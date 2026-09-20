@@ -1,0 +1,28 @@
+<article class="flex min-w-0 flex-col rounded-card border border-line bg-surface p-4 shadow-card sm:p-5">
+  <%= render "shared/catalog/image_placeholder" %>
+
+  <div class="mt-5 flex flex-1 flex-col">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <%= render "shared/badge", label: "Sample item", tone: :warning %>
+      <% if product.freshness.observed_at %>
+        <time datetime="<%= product.freshness.observed_at.iso8601 %>" class="text-xs font-semibold text-muted">
+          Observed <%= product.freshness.observed_at.utc.strftime("%b %-d, %Y") %>
+        </time>
+      <% end %>
+    </div>
+
+    <h2 class="mt-4 min-w-0 font-display text-2xl font-bold tracking-tight text-ink">
+      <%= link_to product.title, product_path(product.id), class: "inline-flex min-h-11 min-w-11 max-w-full items-center break-all rounded-lg text-left hover:text-brand-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %>
+    </h2>
+    <% if product.description.present? %>
+      <p class="mt-2 break-words text-sm leading-6 text-muted"><%= product.description %></p>
+    <% end %>
+
+    <div class="mt-5 space-y-2 border-t border-line pt-4 text-sm">
+      <% price = catalog_product_price(product) %>
+      <p data-price-state="<%= price&.state || :unknown %>" class="font-bold text-ink"><%= price ? catalog_price_label(price) : "Illustrative price unavailable" %></p>
+      <% availability = catalog_product_availability(product) %>
+      <p data-availability-state="<%= availability&.state || :unknown %>" class="text-muted"><%= availability ? catalog_availability_label(availability) : "Availability unknown" %></p>
+    </div>
+  </div>
+</article>
