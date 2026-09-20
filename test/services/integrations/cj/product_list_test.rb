@@ -143,7 +143,7 @@ class CjProductListTest < ActiveSupport::TestCase
       { "code" => 200, "result" => true, "data" => { "total" => -1, "list" => [] } },
       { "code" => 200, "result" => true, "data" => { "total" => 1, "list" => "not an array" } },
       { "code" => 200, "result" => true, "data" => { "total" => 1, "list" => [ { "productNameEn" => "No pid" } ] } },
-      { "code" => 200, "result" => true, "data" => { "total" => 1, "list" => [ "not a hash" ] } },
+      { "code" => 200, "result" => true, "data" => { "total" => 1, "list" => [ "not a hash" ] } }
     ].each do |body|
       error = assert_raises(CjError) { normalize(body) }
       assert_equal :malformed_response, error.code
