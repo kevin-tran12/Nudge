@@ -35,6 +35,7 @@ services:
       RAILS_MAX_THREADS: 5
       PROVIDER_MODE: fixture
       CJ_MODE: fixture
+      COVERAGE_ROOT: /coverage
     depends_on:
       db:
         condition: service_healthy
@@ -52,6 +53,7 @@ services:
       - rails_storage:/rails/storage
       - rails_tmp:/rails/tmp
       - rails_asset_builds:/rails/app/assets/builds
+      - rails_coverage:/coverage
     stdin_open: true
     tty: true
 
@@ -61,3 +63,4 @@ volumes:
   rails_storage:
   rails_tmp:
   rails_asset_builds:
+  rails_coverage:

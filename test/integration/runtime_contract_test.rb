@@ -56,6 +56,49 @@ class RuntimeContractTest < ActiveSupport::TestCase
     refute_match(/could not translate host name|connection.*failed/i, stderr)
   end
 
+  test "rails test rejects an unsafe DATABASE_URL before schema maintenance" do
+    environment = {
+      "RAILS_ENV" => "test",
+      "DATABASE_URL" => "postgresql://nudge:local@unreachable.invalid/nudge_development",
+      "PROVIDER_MODE" => "fixture",
+      "CJ_MODE" => "fixture",
+      "DATABASE_SAFETY_PROBE" => "1"
+    }
+    stdout, stderr, status = Open3.capture3(
+      environment,
+      Rails.root.join("bin/rails").to_s,
+      "test",
+      "test/lib/test_foundation_test.rb"
+    )
+
+    refute_predicate status, :success?
+    refute_includes stderr, "TEST_SCHEMA_MAINTENANCE_REACHED"
+    assert_includes stderr, "Development and test must use different databases"
+    refute_match(/could not translate host name|connection.*failed|schema_migrations/i, stdout + stderr)
+  end
+
+  test "rails test rejects a non-test DATABASE_URL before schema maintenance" do
+    environment = {
+      "RAILS_ENV" => "test",
+      "DATABASE_URL" => "postgresql://nudge:local@unreachable.invalid/nudge_staging",
+      "PROVIDER_MODE" => "fixture",
+      "CJ_MODE" => "fixture",
+      "DATABASE_SAFETY_PROBE" => "1"
+    }
+    stdout, stderr, status = Open3.capture3(
+      environment,
+      Rails.root.join("bin/rails").to_s,
+      "test",
+      "test/lib/test_foundation_test.rb"
+    )
+
+    refute_predicate status, :success?
+    refute_includes stderr, "TEST_SCHEMA_MAINTENANCE_REACHED"
+    refute_includes stdout, "DATABASE_QUERY_REACHED"
+    assert_includes stderr, "Test database name must end in _test"
+    refute_match(/could not translate host name|connection.*failed|schema_migrations/i, stdout + stderr)
+  end
+
   test "production boot preserves DATABASE_URL without connecting during isolation validation" do
     environment = {
       "RAILS_ENV" => "production",

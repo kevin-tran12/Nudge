@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+ENV["RAILS_ENV"] = "test"
+ENV["TEST_LANE"] = "integration"
+
+require_relative "../test/support/test_lane"
+
+files = TestSupport::TestLane.files(:integration)
+abort "Integration/contract test lane has no tests" if files.empty?
+
+exec({ "TEST_LANE" => "integration" }, File.expand_path("rails", __dir__), "test", *files, *ARGV)

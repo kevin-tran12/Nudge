@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+ENV["RAILS_ENV"] = "test"
+
+require_relative "../test/support/test_lane"
+
+files = TestSupport::TestLane.files(:browser)
+abort "Browser E2E is not configured: no test/system tests are registered" if files.empty?
+abort "Set RUN_BROWSER_TESTS=1 only in a browser-capable environment" unless ENV["RUN_BROWSER_TESTS"] == "1"
+
+exec({ "TEST_LANE" => "browser" }, File.expand_path("rails", __dir__), "test:system", *ARGV)

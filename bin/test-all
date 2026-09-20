@@ -1,0 +1,10 @@
+#!/usr/bin/env ruby
+
+ENV["RAILS_ENV"] = "test"
+ENV["TEST_LANE"] = "all"
+ENV["COVERAGE_ENFORCE"] = "1"
+
+exec({
+  "TEST_LANE" => "all",
+  "COVERAGE_ENFORCE" => "1"
+}, File.expand_path("rails", __dir__), "test", *ARGV)
