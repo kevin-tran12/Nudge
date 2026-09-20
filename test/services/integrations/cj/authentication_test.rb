@@ -31,6 +31,13 @@ class CjAuthenticationTest < ActiveSupport::TestCase
     assert_raises(FrozenError) { result.token.value << "changed" }
     refute_includes result.inspect, "synthetic-access-token"
     refute_includes result.token.inspect, "synthetic-access-token"
+    refute_includes result.as_json.inspect, "synthetic-access-token"
+    refute_includes result.to_json, "synthetic-access-token"
+    refute_includes result.token.as_json.inspect, "synthetic-access-token"
+    refute_includes result.token.to_json, "synthetic-access-token"
+    refute_includes({ authentication: result }.as_json.to_json, "synthetic-access-token")
+    assert_equal({ "code" => "refreshed", "token" => { "expires_at" => result.token.expires_at.iso8601 } },
+      result.as_json)
     refute_includes observed.inspect, "synthetic-access-token"
     assert_equal [ :refresh_started, :refresh_succeeded ], observed.map(&:first)
     assert_equal 9, governor.remaining[:recovery]
@@ -81,7 +88,7 @@ class CjAuthenticationTest < ActiveSupport::TestCase
     end
     12.times { start << true }
     entered.pop
-    release << true
+    12.times { release << true }
     threads.each { |thread| assert thread.join(5), "authentication caller did not finish" }
 
     results = threads.map(&:value)
@@ -209,6 +216,76 @@ class CjAuthenticationTest < ActiveSupport::TestCase
         :authentication_failed : :malformed_response
       assert_error(code) { authentication.fetch }
       assert authentication.paused?
+    end
+  end
+
+  test "a newly issued token inside the refresh window pauses after one provider attempt" do
+    clock = fake_clock
+    calls = 0
+    authentication, governor = build_authentication(clock:, refresh_before: 1.day,
+      transport: lambda { |credential:|
+        calls += 1
+        { value: "too-short-token", expires_at: clock.now + 1.day }
+      })
+
+    3.times { assert_error(:malformed_response) { authentication.fetch } }
+
+    assert authentication.paused?
+    assert_equal 1, calls
+    assert_equal 9, governor.remaining[:recovery]
+  end
+
+  test "concurrent callers share a terminal short-lifetime outcome without a refresh storm" do
+    clock = fake_clock
+    entered = Queue.new
+    release = Queue.new
+    calls = 0
+    authentication, governor = build_authentication(clock:, refresh_before: 1.day,
+      transport: lambda { |credential:|
+        calls += 1
+        entered << true
+        release.pop
+        { value: "too-short-shared-token", expires_at: clock.now + 1.hour }
+      })
+    start = Queue.new
+    threads = 12.times.map do
+      Thread.new do
+        start.pop
+        authentication.fetch
+      rescue Integrations::Cj::Error => error
+        error.code
+      end
+    end
+    12.times { start << true }
+    entered.pop
+    12.times { release << true }
+    threads.each { |thread| assert thread.join(5), "authentication caller did not finish" }
+
+    assert_equal [ :malformed_response ], threads.map(&:value).uniq
+    assert_equal 1, calls
+    assert_equal 9, governor.remaining[:recovery]
+    assert authentication.paused?
+  ensure
+    release << true if release && release.empty?
+    threads&.each { |thread| thread.kill if thread.alive? }
+  end
+
+  test "non UTF-8 token values fail terminally without regex encoding errors" do
+    clock = fake_clock
+    values = [ "token".encode(Encoding::UTF_16LE), "token\xFF".b.force_encoding(Encoding::UTF_8) ]
+
+    values.each do |value|
+      calls = 0
+      authentication, = build_authentication(clock:, transport: lambda { |credential:|
+        calls += 1
+        { value:, expires_at: clock.now + 30.days }
+      })
+
+      error = assert_error(:malformed_response) { authentication.fetch }
+      assert_nil error.cause
+      assert authentication.paused?
+      assert_error(:malformed_response) { authentication.fetch }
+      assert_equal 1, calls
     end
   end
 

@@ -30,6 +30,14 @@ module Integrations
         def inspect
           "#<#{self.class.name} value=[FILTERED] expires_at=#{expires_at.iso8601}>"
         end
+
+        def as_json(*)
+          { "expires_at" => expires_at.iso8601 }
+        end
+
+        def to_json(options = nil)
+          as_json.to_json(options)
+        end
       end
 
       class Result
@@ -45,6 +53,14 @@ module Integrations
 
         def inspect
           "#<#{self.class.name} code=#{code.inspect} token=#{token.inspect}>"
+        end
+
+        def as_json(*)
+          { "code" => code.to_s, "token" => token.as_json }
+        end
+
+        def to_json(options = nil)
+          as_json.to_json(options)
         end
       end
 
@@ -70,11 +86,12 @@ module Integrations
         @max_attempts = max_attempts
         @mutex = Mutex.new
         @paused = false
+        @pause_code = nil
       end
 
       def fetch
         @mutex.synchronize do
-          raise Error.new(:authentication_failed), cause: nil if @paused
+          raise Error.new(@pause_code), cause: nil if @paused
 
           now = trusted_now
           if @token && !@token.refresh_due?(now, @refresh_before)
@@ -93,6 +110,7 @@ module Integrations
       def recover!
         @mutex.synchronize do
           @paused = false
+          @pause_code = nil
           @token = nil
           observe(:authentication_recovered)
         end
@@ -141,11 +159,13 @@ module Integrations
 
           value = response[:value]
           expires_at = response[:expires_at]
-          unless value.is_a?(String) && value.valid_encoding? && value.bytesize.between?(1, 8_192) &&
+          unless value.is_a?(String) && value.encoding == Encoding::UTF_8 && value.valid_encoding? &&
+              value.bytesize.between?(1, 8_192) &&
               !value.match?(/[[:cntrl:]]/) && expires_at.instance_of?(Time)
             raise Error.new(:malformed_response), cause: nil
           end
           raise Error.new(:authentication_failed), cause: nil unless expires_at > now
+          raise Error.new(:malformed_response), cause: nil if expires_at <= now + @refresh_before
 
           Token.new(value:, expires_at: [ expires_at, now + MAX_TOKEN_LIFETIME ].min)
         end
@@ -190,6 +210,7 @@ module Integrations
 
         def fail_attempt!(error)
           @paused = true
+          @pause_code = error.code
           @token = nil
           observe(:authentication_paused, code: error.code)
           raise error, cause: nil
