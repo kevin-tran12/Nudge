@@ -35,6 +35,14 @@ module Integrations
         def inspect
           "#<#{self.class.name} configured>"
         end
+
+        def as_json(*)
+          { "configured" => true }
+        end
+
+        def to_json(...)
+          as_json.to_json(...)
+        end
       end
     end
   end

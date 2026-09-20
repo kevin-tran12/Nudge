@@ -8,7 +8,24 @@ module Integrations
         :message_type,
         :event_type,
         :params
-      )
+      ) do
+        def inspect
+          "#<#{self.class.name} payload_sha256=#{payload_sha256}>"
+        end
+
+        def as_json(*)
+          {
+            "payload_sha256" => payload_sha256,
+            "message_id" => message_id,
+            "message_type" => message_type,
+            "event_type" => event_type
+          }
+        end
+
+        def to_json(...)
+          as_json.to_json(...)
+        end
+      end
 
       module Contracts
         module_function

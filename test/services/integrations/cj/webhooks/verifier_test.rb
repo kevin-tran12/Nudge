@@ -13,9 +13,10 @@ class CjWebhookVerifierTest < ActiveSupport::TestCase
     assert_equal raw_body.b, result.raw_body
     assert_equal Digest::SHA256.hexdigest(raw_body), result.payload_sha256
     assert_equal "fixture-message-001", result.message_id
-    assert_equal "PRODUCT", result.message_type
-    assert_equal "UPDATE", result.event_type
+    assert_equal "UPDATE", result.message_type
+    assert_equal "PRODUCT", result.event_type
     assert_equal "product-fixture-001", result.params.fetch("pid")
+    assert_equal 3, result.params.fetch("productStatus") # CJ's documented on-sale status.
     assert_predicate result, :frozen?
     assert_predicate result.raw_body, :frozen?
     assert_predicate result.params, :frozen?
@@ -24,10 +25,57 @@ class CjWebhookVerifierTest < ActiveSupport::TestCase
 
   test "rejects body mutation before parsing" do
     raw_body = File.binread(FIXTURE)
-    mutated = raw_body.sub("ACTIVE", "PAUSED")
+    mutated = raw_body.sub("product-fixture-001", "product-fixture-002")
+    refute_equal raw_body, mutated
 
     assert_error(:invalid_signature) do
       verifier.call(raw_body: mutated, signature: signature_for(raw_body))
+    end
+  end
+
+  test "matches the documented standard Base64 HMAC SHA256 vector" do
+    # Public example: https://developers.cjdropshipping.com/en/api/start/webhook.html
+    dependency = Integrations::Cj::Webhooks::HmacSignatureVerifier.new(open_id: "123")
+    raw_body = '{"messageId":"123111","messageType":"INSERT","params":"123","type":"PRODUCT"}'
+    signature = "AHxoGFMoS/4mZfJ5vFes5//Pz2QibFQhh3GlrTtnWpk="
+
+    assert dependency.verify(raw_body:, signature:)
+    refute dependency.verify(raw_body: raw_body + "\n", signature:)
+    refute dependency.verify(raw_body:, signature: signature.delete_suffix("="))
+    refute dependency.verify(raw_body:, signature: signature + "\n")
+  end
+
+  test "signing dependencies expose no keys through direct or nested serialization" do
+    dependency = Integrations::Cj::Webhooks::HmacSignatureVerifier.new(open_id: OPEN_ID)
+    boundary = Integrations::Cj::Webhooks::Verifier.new(signature_verifier: dependency)
+
+    [ dependency, boundary ].each do |value|
+      refute_includes value.inspect, OPEN_ID
+      assert_equal({ "configured" => true }, value.as_json)
+      serialized_forms(value).each { |serialized| refute_includes serialized, OPEN_ID }
+    end
+  end
+
+  test "result inspection and JSON expose only metadata while retaining explicit immutable payload access" do
+    secret = "synthetic-sensitive-payload"
+    raw_body = JSON.generate(messageId: "id", messageType: "UPDATE", type: "PRODUCT", params: { openId: secret })
+    result = verifier.call(raw_body:, signature: signature_for(raw_body))
+    metadata = {
+      "payload_sha256" => Digest::SHA256.hexdigest(raw_body),
+      "message_id" => "id", "message_type" => "UPDATE", "event_type" => "PRODUCT"
+    }
+
+    assert_equal raw_body, result.raw_body
+    assert_equal secret, result.params.fetch("openId")
+    assert_predicate result.params.fetch("openId"), :frozen?
+    assert_equal metadata, result.as_json
+    assert_equal metadata, JSON.parse(result.to_json)
+    assert_equal({ "value" => [ metadata ] }, JSON.parse(ActiveSupport::JSON.encode(value: [ result ])))
+    refute_includes result.inspect, secret
+    serialized_forms(result).each do |serialized|
+      refute_includes serialized, secret
+      refute_includes serialized, "raw_body"
+      refute_includes serialized, "params"
     end
   end
 
@@ -46,10 +94,10 @@ class CjWebhookVerifierTest < ActiveSupport::TestCase
     bodies = [
       "not-json",
       "[]",
-      '{"messageId":"id","messageType":"PRODUCT","type":"UPDATE"}',
-      '{"messageId":"","messageType":"PRODUCT","type":"UPDATE","params":{}}',
-      "{\"messageId\":\"id\\u0000\",\"messageType\":\"PRODUCT\",\"type\":\"UPDATE\",\"params\":{}}",
-      '{"messageId":"id","messageType":"PRODUCT","type":"UPDATE","params":"not-structured"}'
+      '{"messageId":"id","messageType":"UPDATE","type":"PRODUCT"}',
+      '{"messageId":"","messageType":"UPDATE","type":"PRODUCT","params":{}}',
+      "{\"messageId\":\"id\\u0000\",\"messageType\":\"UPDATE\",\"type\":\"PRODUCT\",\"params\":{}}",
+      '{"messageId":"id","messageType":"UPDATE","type":"PRODUCT","params":"not-structured"}'
     ]
 
     bodies.each do |raw_body|
@@ -69,10 +117,10 @@ class CjWebhookVerifierTest < ActiveSupport::TestCase
   end
 
   test "bounds nested and wide JSON input" do
-    nested = '{"messageId":"id","messageType":"PRODUCT","type":"UPDATE","params":' +
+    nested = '{"messageId":"id","messageType":"UPDATE","type":"PRODUCT","params":' +
       ("[" * 13) + "{}" + ("]" * 13) + "}"
     wide_params = Array.new(501, 0)
-    wide = JSON.generate(messageId: "id", messageType: "PRODUCT", type: "UPDATE", params: wide_params)
+    wide = JSON.generate(messageId: "id", messageType: "UPDATE", type: "PRODUCT", params: wide_params)
 
     [ nested, wide ].each do |raw_body|
       assert_error(:malformed_payload) do
@@ -92,6 +140,56 @@ class CjWebhookVerifierTest < ActiveSupport::TestCase
     end
     refute_includes error.message, "synthetic-secret"
     assert_nil error.cause
+  end
+
+  test "reconstructs classified verifier and parser errors without retaining sensitive causes" do
+    raw_body = File.binread(FIXTURE)
+
+    { verify: :invalid_signature, call: :malformed_payload }.each do |method, code|
+      original = Integrations::Cj::Webhooks::Error.new(code)
+      original.set_backtrace([ "synthetic-secret dependency detail" ])
+      dependency = Object.new
+      dependency.define_singleton_method(method) do |**|
+        raise original, cause: RuntimeError.new("synthetic-secret provider cause")
+      end
+      boundary = if method == :verify
+        Integrations::Cj::Webhooks::Verifier.new(signature_verifier: dependency)
+      else
+        Integrations::Cj::Webhooks::Verifier.new(
+          signature_verifier: Integrations::Cj::Webhooks::HmacSignatureVerifier.new(open_id: OPEN_ID),
+          parser: dependency
+        )
+      end
+
+      error = assert_error(code) { boundary.call(raw_body:, signature: signature_for(raw_body)) }
+      refute_same original, error
+      assert_nil error.cause
+      refute_includes error.full_message, "synthetic-secret"
+    end
+  end
+
+  test "rejects positive and negative numeric overflow without rejecting finite numbers" do
+    [ "1e400", "-1e400" ].each do |number|
+      raw_body = %({"messageId":"id","messageType":"UPDATE","type":"PRODUCT","params":{"value":#{number}}})
+      error = assert_error(:malformed_payload) { verifier.call(raw_body:, signature: signature_for(raw_body)) }
+      assert_nil error.cause
+    end
+
+    raw_body = '{"messageId":"id","messageType":"UPDATE","type":"PRODUCT","params":{"integer":3,"float":1.5}}'
+    result = verifier.call(raw_body:, signature: signature_for(raw_body))
+    assert_equal({ "integer" => 3, "float" => 1.5 }, result.params)
+  end
+
+  test "rejects duplicate keys at root and nested levels with sanitized errors" do
+    bodies = [
+      '{"messageId":"id","messageId":"duplicate","messageType":"UPDATE","type":"PRODUCT","params":{}}',
+      '{"messageId":"id","messageType":"UPDATE","type":"PRODUCT","params":{"value":1,"value":2}}'
+    ]
+
+    bodies.each do |raw_body|
+      error = assert_error(:malformed_payload) { verifier.call(raw_body:, signature: signature_for(raw_body)) }
+      assert_nil error.cause
+    end
   end
 
   test "requires an injected verifier and validates HMAC configuration" do
@@ -129,5 +227,16 @@ class CjWebhookVerifierTest < ActiveSupport::TestCase
       assert_equal code, error.code
       assert_equal "CJ webhook: #{code}", error.message
       error
+    end
+
+    def serialized_forms(value)
+      [
+        value.as_json.to_json,
+        value.to_json,
+        JSON.generate(value),
+        ActiveSupport::JSON.encode(value),
+        { value: [ value ] }.to_json,
+        ActiveSupport::JSON.encode(value: [ value ])
+      ]
     end
 end

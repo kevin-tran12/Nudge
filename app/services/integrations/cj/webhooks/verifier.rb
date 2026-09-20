@@ -19,14 +19,23 @@ module Integrations
           raise Error.new(:invalid_signature) unless verified == true
 
           @parser.call(raw_body:)
-        rescue Error
-          raise
+        rescue Error => error
+          code = Error::CODES.include?(error.code) ? error.code : :invalid_signature
+          raise Error.new(code), cause: nil
         rescue StandardError
           raise Error.new(:invalid_signature), cause: nil
         end
 
         def inspect
           "#<#{self.class.name} configured>"
+        end
+
+        def as_json(*)
+          { "configured" => true }
+        end
+
+        def to_json(...)
+          as_json.to_json(...)
         end
       end
     end

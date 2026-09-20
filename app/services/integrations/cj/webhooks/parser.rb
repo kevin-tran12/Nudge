@@ -67,7 +67,9 @@ module Integrations
                 pending.concat(value)
               when String
                 malformed! unless value.valid_encoding?
-              when Integer, Float, TrueClass, FalseClass, NilClass
+              when Float
+                malformed! unless value.finite?
+              when Integer, TrueClass, FalseClass, NilClass
                 nil
               else
                 malformed!
