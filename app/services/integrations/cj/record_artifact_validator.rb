@@ -65,6 +65,24 @@ module Integrations
         clearanceOperationFee logisticAging logisticName logisticPrice taxesFee totalPostageFee
       ].freeze
       ACTIVE_ELEMENTS = "script, style, template, iframe, object".freeze
+      # Persisted evidence must not be able to execute or exfiltrate, but real
+      # CJ descriptions are ordinary marketing HTML (<img src>, <br/>, <b>,
+      # style="max-width:100%"). Rejecting every attribute made every genuine
+      # product unstorable, so only the attributes that are themselves an
+      # execution or navigation vector are refused:
+      #   * any event handler, i.e. any name beginning "on";
+      #   * srcdoc / formaction / xlink:href;
+      #   * any value whose URL scheme is one of DANGEROUS_SCHEMES.
+      # Benign presentational attributes, and href/src to an ordinary
+      # http(s) or relative URL, are kept: they are inert data, and the
+      # normalizer independently re-checks every media URL against the media
+      # host allowlist before anything is displayed.
+      DANGEROUS_ATTRIBUTES = %w[srcdoc formaction xlink:href].freeze
+      DANGEROUS_SCHEMES = %w[javascript vbscript data blob filesystem about].freeze
+      # Browsers strip ASCII control characters (tab, CR, LF, NUL) out of a URL
+      # before resolving its scheme, so "java\tscript:" and "JaVaScRiPt:" both
+      # execute. Normalize the same way before comparing.
+      SCHEME_NOISE = Regexp.new("[\u0000-\u001f\u007f]").freeze
       # Bounded at the largest integer a JSON double round-trips exactly
       # (2**53 - 1). The previous ceiling of 1e10 rejected every real CJ
       # response, whose createTime is a millisecond epoch around 1.79e12.
@@ -340,10 +358,29 @@ module Integrations
               fragment.traverse do |node|
                 next unless node.element?
 
-                raise Error.new(:malformed_response) if node.attribute_nodes.any?
+                node.attribute_nodes.each do |attribute|
+                  raise Error.new(:malformed_response) if dangerous_attribute?(attribute)
+                end
               end
             end
           end
+        end
+
+        def dangerous_attribute?(attribute)
+          name = attribute.name.to_s.downcase
+          prefix = attribute.namespace&.prefix.to_s.downcase
+          qualified = prefix.empty? ? name : "#{prefix}:#{name}"
+          return true if name.start_with?("on")
+          return true if DANGEROUS_ATTRIBUTES.include?(name) || DANGEROUS_ATTRIBUTES.include?(qualified)
+
+          dangerous_scheme?(attribute.value)
+        end
+
+        def dangerous_scheme?(value)
+          return false unless value.is_a?(String) && value.include?(":")
+
+          candidate = value.gsub(SCHEME_NOISE, "").lstrip.downcase
+          DANGEROUS_SCHEMES.any? { |scheme| candidate.start_with?("#{scheme}:") }
         end
 
         def object!(value, allowed)
