@@ -16,6 +16,7 @@ env:
   COMPOSE_ANSI: never
   CI_IMAGE: nudge-ci:${{ github.sha }}
   PROVIDER_MODE: fixture
+  CJ_MODE: fixture
   RAILS_TEST_WORKERS: 1
   TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
@@ -82,6 +83,67 @@ jobs:
       - name: Tear down test services
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  browser:
+    name: Browser system tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      BROWSER_COMPOSE_PROJECT: nudge-browser-${{ github.run_id }}-${{ github.run_attempt }}
+      SYSTEM_TEST_ARTIFACTS_PATH: ./tmp/browser-artifacts
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Configure browser artifact ownership
+        shell: bash
+        run: |
+          echo "HOST_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "HOST_GID=$(id -g)" >> "$GITHUB_ENV"
+          mkdir -p tmp/browser-artifacts tmp/browser-results
+
+      - name: Validate browser Compose configuration
+        run: docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml --profile tools config --quiet
+
+      - name: Build browser test images
+        run: docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml --profile tools build system_app system_tests artifact_export
+
+      - name: Start browser services
+        run: docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml up --detach --wait db browser system_app
+
+      - name: Verify browser application container contract
+        run: docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml exec -T system_app ruby test/runtime/system_test_container_contract.rb /rails/log /rails/storage /rails/tmp /rails/app/assets/builds
+
+      - name: Verify browser runner container contract
+        run: docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml run --rm --no-deps system_tests ruby test/runtime/system_test_container_contract.rb /rails/log /rails/storage /rails/tmp /rails/app/assets/builds /coverage
+
+      - name: Run browser system tests
+        shell: bash
+        run: |
+          set -o pipefail
+          docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml run --rm --no-deps system_tests bin/test-browser 2>&1 | tee tmp/browser-results/browser.log
+
+      - name: Export browser evidence
+        if: always()
+        run: docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml --profile tools run --rm --no-deps artifact_export
+
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-evidence-${{ github.run_id }}
+          path: |
+            tmp/browser-artifacts/
+            tmp/browser-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Tear down browser services
+        if: always()
+        run: docker compose -p "$BROWSER_COMPOSE_PROJECT" -f compose.yaml -f compose.system-test.yaml down --volumes --remove-orphans
 
   quality:
     name: Ruby quality and application security
