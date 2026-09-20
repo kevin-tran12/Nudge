@@ -35,6 +35,8 @@ module Voice
     TOOLS = {
       "search_products" => Agents::Tools::SearchProducts,
       "get_product_details" => Agents::Tools::GetProductDetails,
+      "recommend_products" => Agents::Tools::RecommendProducts,
+      "update_requirements" => Agents::Tools::UpdateRequirements,
       "get_current_shopping_state" => Agents::Tools::GetCurrentShoppingState
     }.freeze
 
