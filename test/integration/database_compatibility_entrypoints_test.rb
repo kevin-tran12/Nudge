@@ -10,6 +10,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
   CATALOG_MIGRATION_VERSION = "20260920000003"
   CATALOG_EVIDENCE_MIGRATION_VERSION = "20260920000004"
   SEARCH_MIGRATION_VERSION = "20260920000005"
+  CART_MIGRATION_VERSION = "20260920000007"
   IDENTITY_TABLES = %w[
     agent_provider_sessions
     ai_access_grants
@@ -35,6 +36,15 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     supplier_subscriptions
   ].freeze
   SEARCH_TABLES = %w[search_documents embedding_models embeddings].freeze
+  CART_TABLES = %w[
+    freight_quotes
+    checkout_validation_items
+    checkout_validations
+    checkout_intents
+    cart_mutations
+    cart_items
+    carts
+  ].freeze
 
   SHOPPING_DECISIONS_MIGRATION_VERSION = Rails.root.glob("db/migrate/*.rb")
     .find { |path| path.read.match?(/create_table\s+:?"?shopping_messages"?/) }
@@ -89,6 +99,9 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
         assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
         # DB-06 adds foreign keys into product_facts/price_observations/inventory_observations/
         # supplier_observations, so it must be rolled back before DB-04 can drop those tables.
+        # DB-07 adds foreign keys from checkout_validation_items into price_observations/
+        # inventory_observations, so it must also be rolled back before DB-04 can drop those tables.
+        assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{CART_MIGRATION_VERSION}", schema: structure.path)
         assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}", schema: structure.path)
         assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}", schema: structure.path)
 
@@ -106,6 +119,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
 
         assert_command_succeeds run_rails(database, "db:migrate:redo", "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}", schema: structure.path)
         assert_command_succeeds run_rails(database, "db:migrate:up", "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}", schema: structure.path)
+        assert_command_succeeds run_rails(database, "db:migrate:up", "VERSION=#{CART_MIGRATION_VERSION}", schema: structure.path)
         CATALOG_EVIDENCE_TABLES.each do |table|
           assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
         end
@@ -185,12 +199,61 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     end
   end
 
+  test "cart and checkout intent migration rolls back cleanly, redoes, and survives structure load" do
+    with_database do |database, connection|
+      Tempfile.create([ "db07-rollback", ".sql" ]) do |structure|
+        assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+        assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{CART_MIGRATION_VERSION}", schema: structure.path)
+
+        CART_TABLES.each do |table|
+          assert_nil connection.exec_params("SELECT to_regclass($1)", [ "public.#{table}" ]).getvalue(0, 0), table
+        end
+        %w[shopping_sessions product_variants suppliers].each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+
+        assert_command_succeeds run_rails(database, "db:migrate:redo", "VERSION=#{CART_MIGRATION_VERSION}", schema: structure.path)
+        CART_TABLES.each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+        assert_equal "1", connection.exec_params(<<~SQL).getvalue(0, 0)
+          SELECT count(*) FROM pg_indexes
+          WHERE schemaname = 'public' AND tablename = 'carts' AND indexdef ILIKE '%WHERE%active%'
+        SQL
+
+        assert_command_succeeds run_rails(database, "db:schema:dump", schema: structure.path)
+        dumped = File.read(structure.path)
+        assert_includes dumped, Nudge::DatabaseCompatibility::PGVECTOR_STRUCTURE_STATEMENT
+        assert_includes dumped, "checkout_intents"
+        assert_includes dumped, "nudge_prevent_execution_mode_change"
+
+        with_database do |load_database, load_connection|
+          assert_command_succeeds run_rails(load_database, "db:schema:load", schema: structure.path)
+          CART_TABLES.each do |table|
+            assert_equal table, load_connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+          end
+          assert_equal "0.8.5", load_connection.exec(<<~SQL).getvalue(0, 0)
+            SELECT extversion FROM pg_extension WHERE extname = 'vector'
+          SQL
+        end
+      end
+    end
+  end
+
   test "catalog migration rolls back completely and preserves its constraints through redo and schema load" do
     with_database do |database, connection|
       Tempfile.create([ "db03-rollback", ".sql" ]) do |structure|
         assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
         # DB-06 adds foreign keys into products/product_variants (via recommendation_candidates)
         # and into DB-04's catalog evidence tables, so it must roll back before either does.
+        # DB-07 adds foreign keys into product_variants/suppliers and into DB-04's catalog
+        # evidence tables, so it must also roll back before any of them does.
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{CART_MIGRATION_VERSION}",
+          schema: structure.path
+        )
         assert_command_succeeds run_rails(
           database,
           "db:migrate:down",
@@ -250,6 +313,12 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}",
           schema: structure.path
         )
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:up",
+          "VERSION=#{CART_MIGRATION_VERSION}",
+          schema: structure.path
+        )
         CATALOG_TABLES.each do |table|
           assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
         end
@@ -292,6 +361,14 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
 
         # DB-06's agent_runs has composite foreign keys into ai_access_grants and
         # agent_provider_sessions, so it must roll back before DB-02 can drop those tables.
+        # DB-07's carts has a foreign key into shopping_sessions, so it must also roll back
+        # before DB-02 can drop that table.
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{CART_MIGRATION_VERSION}",
+          schema: structure.path
+        )
         assert_command_succeeds run_rails(
           database,
           "db:migrate:down",
@@ -324,6 +401,12 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           database,
           "db:migrate:up",
           "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:up",
+          "VERSION=#{CART_MIGRATION_VERSION}",
           schema: structure.path
         )
         IDENTITY_TABLES.each do |table|
