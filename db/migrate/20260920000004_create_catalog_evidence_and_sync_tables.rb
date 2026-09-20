@@ -64,7 +64,6 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
       t.datetime :purged_at
       t.datetime :created_at, null: false, default: -> { "CURRENT_TIMESTAMP" }
     end
-    add_index :supplier_observations, :supplier_id
     add_index :supplier_observations, %i[id supplier_id], unique: true
     add_index :supplier_observations, :encryption_context, unique: true
     add_index :supplier_observations, %i[supplier_id resource_kind external_resource_id observed_at id], order: { observed_at: :desc, id: :desc }, name: "index_supplier_observations_resource_chronology"
@@ -178,7 +177,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :product_facts, :supersedes_product_fact_id
     %w[boolean integer decimal text].each do |kind|
       column = "#{kind}_value"
-      add_index :product_facts, [ :fact_definition_id, column, :product_id, :product_variant_id, :id ], where: "status = 'active' AND #{column} IS NOT NULL", name: "index_product_facts_active_#{kind}"
+      add_index :product_facts, [ :fact_definition_id, column, :product_id, :product_variant_id ], where: "status = 'active' AND #{column} IS NOT NULL", name: "index_product_facts_active_#{kind}"
     end
     add_foreign_key :product_facts, :products, on_delete: :cascade
     add_foreign_key :product_facts, :product_variants, on_delete: :cascade
@@ -217,7 +216,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :price_observations, :supplier_id
     add_index :price_observations, %i[supplier_observation_id supplier_id]
     add_index :price_observations, %i[supplier_variant_id price_kind currency observed_at id], order: { observed_at: :desc, id: :desc }, name: "index_price_observations_current"
-    add_foreign_key :price_observations, :suppliers, on_delete: :restrict
+    add_foreign_key :price_observations, :suppliers, on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_price_observations_supplier"
     add_foreign_key :price_observations, :supplier_variants, column: %i[supplier_variant_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_price_observations_variant_supplier"
     add_foreign_key :price_observations, :supplier_observations, column: %i[supplier_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_price_observations_source_supplier"
     add_check_constraint :price_observations, "amount_minor >= 0", name: "price_observations_amount_check"
@@ -246,7 +245,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :inventory_observations, %i[supplier_warehouse_id supplier_id]
     add_index :inventory_observations, %i[supplier_observation_id supplier_id]
     add_index :inventory_observations, %i[supplier_variant_id supplier_warehouse_id observed_at id], order: { observed_at: :desc, id: :desc }, name: "index_inventory_observations_current"
-    add_foreign_key :inventory_observations, :suppliers, on_delete: :restrict
+    add_foreign_key :inventory_observations, :suppliers, on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_inventory_observations_supplier"
     add_foreign_key :inventory_observations, :supplier_variants, column: %i[supplier_variant_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_inventory_observations_variant_supplier"
     add_foreign_key :inventory_observations, :supplier_warehouses, column: %i[supplier_warehouse_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_inventory_observations_warehouse_supplier"
     add_foreign_key :inventory_observations, :supplier_observations, column: %i[supplier_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_inventory_observations_source_supplier"
@@ -277,7 +276,6 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
       t.timestamps null: false
     end
     add_index :sync_runs, :public_id, unique: true
-    add_index :sync_runs, :supplier_id
     add_index :sync_runs, %i[supplier_id resource_kind scope_key created_at id], order: { created_at: :desc, id: :desc }, name: "index_sync_runs_scope_chronology"
     add_foreign_key :sync_runs, :suppliers, on_delete: :restrict
     add_check_constraint :sync_runs, "mode IN ('fixture','verify','record','live')", name: "sync_runs_mode_check"
@@ -327,7 +325,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :supplier_subscriptions, %i[supplier_id topic digest_key_version external_ref_digest], unique: true, where: "external_ref_digest IS NOT NULL", name: "index_supplier_subscriptions_provider_ref"
     add_index :supplier_subscriptions, :encryption_context, unique: true
     add_index :supplier_subscriptions, %i[next_retry_at id], where: "next_retry_at IS NOT NULL AND closed_at IS NULL", name: "index_supplier_subscriptions_retry"
-    add_foreign_key :supplier_subscriptions, :suppliers, on_delete: :restrict
+    add_foreign_key :supplier_subscriptions, :suppliers, on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_supplier_subscriptions_supplier"
     add_foreign_key :supplier_subscriptions, :supplier_products, column: %i[supplier_product_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_supplier_subscriptions_product_supplier"
     add_check_constraint :supplier_subscriptions, "num_nonnulls(external_ref_ciphertext,external_ref_digest,digest_key_version) IN (0,3)", name: "supplier_subscriptions_external_ref_pair_check"
     add_check_constraint :supplier_subscriptions, "external_ref_digest IS NULL OR octet_length(external_ref_digest) = 32", name: "supplier_subscriptions_digest_check"

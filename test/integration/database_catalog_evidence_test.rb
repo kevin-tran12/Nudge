@@ -269,7 +269,7 @@ class DatabaseCatalogEvidenceTest < ActiveSupport::TestCase
     typed = connection.indexes("product_facts").select { |index| index.name.start_with?("index_product_facts_active_") }
     assert_equal 4, typed.size
     %w[boolean integer decimal text].each do |kind|
-      assert_index("product_facts", "index_product_facts_active_#{kind}", [ "fact_definition_id", "#{kind}_value", "product_id", "product_variant_id", "id" ], "((status = 'active'::text) AND (#{kind}_value IS NOT NULL))")
+      assert_index("product_facts", "index_product_facts_active_#{kind}", [ "fact_definition_id", "#{kind}_value", "product_id", "product_variant_id" ], "((status = 'active'::text) AND (#{kind}_value IS NOT NULL))")
     end
 
     assert_equal %w[supplier_variant_id price_kind currency observed_at id], connection.indexes("price_observations").find { |index| index.name == "index_price_observations_current" }.columns
@@ -278,6 +278,8 @@ class DatabaseCatalogEvidenceTest < ActiveSupport::TestCase
     assert_equal %w[next_retry_at id], connection.indexes("supplier_subscriptions").find { |index| index.name == "index_supplier_subscriptions_retry" }.columns
     assert_equal %w[normalization_status received_at id], connection.indexes("supplier_observations").find { |index| index.name == "index_supplier_observations_normalization_queue" }.columns
     assert_equal %w[purge_after id], connection.indexes("supplier_observations").find { |index| index.name == "index_supplier_observations_purge_queue" }.columns
+    refute connection.indexes("supplier_observations").any? { |index| index.name == "index_supplier_observations_on_supplier_id" }
+    refute connection.indexes("sync_runs").any? { |index| index.name == "index_sync_runs_on_supplier_id" }
   end
 
   test "makes supplier scoped foreign keys immediate restrictive and nondeferrable" do
@@ -286,6 +288,8 @@ class DatabaseCatalogEvidenceTest < ActiveSupport::TestCase
       fk_inventory_observations_variant_supplier fk_inventory_observations_warehouse_supplier
       fk_inventory_observations_source_supplier fk_supplier_subscriptions_product_supplier
       fk_supplier_products_latest_observation fk_supplier_variants_latest_observation
+      fk_price_observations_supplier fk_inventory_observations_supplier
+      fk_supplier_subscriptions_supplier
     ]
     rows = connection.exec_query(<<~SQL).to_a.index_by { |row| row.fetch("conname") }
       SELECT conname, confupdtype, confdeltype, condeferrable, condeferred

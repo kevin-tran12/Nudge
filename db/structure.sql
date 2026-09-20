@@ -1980,28 +1980,28 @@ CREATE UNIQUE INDEX index_product_categories_on_product_id_and_category_id ON pu
 -- Name: index_product_facts_active_boolean; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_boolean ON public.product_facts USING btree (fact_definition_id, boolean_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (boolean_value IS NOT NULL));
+CREATE INDEX index_product_facts_active_boolean ON public.product_facts USING btree (fact_definition_id, boolean_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (boolean_value IS NOT NULL));
 
 
 --
 -- Name: index_product_facts_active_decimal; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_decimal ON public.product_facts USING btree (fact_definition_id, decimal_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (decimal_value IS NOT NULL));
+CREATE INDEX index_product_facts_active_decimal ON public.product_facts USING btree (fact_definition_id, decimal_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (decimal_value IS NOT NULL));
 
 
 --
 -- Name: index_product_facts_active_integer; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_integer ON public.product_facts USING btree (fact_definition_id, integer_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (integer_value IS NOT NULL));
+CREATE INDEX index_product_facts_active_integer ON public.product_facts USING btree (fact_definition_id, integer_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (integer_value IS NOT NULL));
 
 
 --
 -- Name: index_product_facts_active_text; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_text ON public.product_facts USING btree (fact_definition_id, text_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (text_value IS NOT NULL));
+CREATE INDEX index_product_facts_active_text ON public.product_facts USING btree (fact_definition_id, text_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (text_value IS NOT NULL));
 
 
 --
@@ -2121,13 +2121,6 @@ CREATE UNIQUE INDEX index_supplier_observations_on_encryption_context ON public.
 --
 
 CREATE UNIQUE INDEX index_supplier_observations_on_id_and_supplier_id ON public.supplier_observations USING btree (id, supplier_id);
-
-
---
--- Name: index_supplier_observations_on_supplier_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_supplier_observations_on_supplier_id ON public.supplier_observations USING btree (supplier_id);
 
 
 --
@@ -2278,13 +2271,6 @@ CREATE UNIQUE INDEX index_sync_runs_on_public_id ON public.sync_runs USING btree
 
 
 --
--- Name: index_sync_runs_on_supplier_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_sync_runs_on_supplier_id ON public.sync_runs USING btree (supplier_id);
-
-
---
 -- Name: index_sync_runs_scope_chronology; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2421,6 +2407,14 @@ ALTER TABLE ONLY public.inventory_observations
 
 
 --
+-- Name: inventory_observations fk_inventory_observations_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_observations
+    ADD CONSTRAINT fk_inventory_observations_supplier FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
 -- Name: inventory_observations fk_inventory_observations_variant_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2442,6 +2436,14 @@ ALTER TABLE ONLY public.inventory_observations
 
 ALTER TABLE ONLY public.price_observations
     ADD CONSTRAINT fk_price_observations_source_supplier FOREIGN KEY (supplier_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: price_observations fk_price_observations_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_observations
+    ADD CONSTRAINT fk_price_observations_supplier FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2549,14 +2551,6 @@ ALTER TABLE ONLY public.supplier_variants
 
 
 --
--- Name: supplier_subscriptions fk_rails_69d1b10ef0; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.supplier_subscriptions
-    ADD CONSTRAINT fk_rails_69d1b10ef0 FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
-
-
---
 -- Name: supplier_variants fk_rails_78f4694af5; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2629,14 +2623,6 @@ ALTER TABLE ONLY public.supplier_observations
 
 
 --
--- Name: inventory_observations fk_rails_b2f869df0f; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.inventory_observations
-    ADD CONSTRAINT fk_rails_b2f869df0f FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
-
-
---
 -- Name: supplier_warehouses fk_rails_b6502f29ac; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2677,14 +2663,6 @@ ALTER TABLE ONLY public.shopping_sessions
 
 
 --
--- Name: price_observations fk_rails_e0ce80876e; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.price_observations
-    ADD CONSTRAINT fk_rails_e0ce80876e FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
-
-
---
 -- Name: turnstile_verifications fk_rails_f0d48f06cc; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2722,6 +2700,14 @@ ALTER TABLE ONLY public.supplier_products
 
 ALTER TABLE ONLY public.supplier_subscriptions
     ADD CONSTRAINT fk_supplier_subscriptions_product_supplier FOREIGN KEY (supplier_product_id, supplier_id) REFERENCES public.supplier_products(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: supplier_subscriptions fk_supplier_subscriptions_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_subscriptions
+    ADD CONSTRAINT fk_supplier_subscriptions_supplier FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
