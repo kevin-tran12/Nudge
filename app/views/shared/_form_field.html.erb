@@ -1,0 +1,25 @@
+<%
+  field_errors = Array(local_assigns[:errors]).compact
+  help_id = "#{name}_help" if local_assigns[:help].present?
+  errors_id = "#{name}_errors" if field_errors.any?
+  described_by = [help_id, errors_id].compact.join(" ").presence
+%>
+
+<div class="space-y-2">
+  <%= label_tag name, label, class: "block font-bold text-ink" %>
+  <% if help_id %>
+    <p id="<%= help_id %>" class="text-sm leading-6 text-muted"><%= help %></p>
+  <% end %>
+  <%= text_field_tag name, local_assigns.fetch(:value, nil),
+      type: local_assigns.fetch(:type, "text"),
+      autocomplete: local_assigns.fetch(:autocomplete, nil),
+      aria: { invalid: field_errors.any?.to_s, describedby: described_by },
+      class: "min-h-11 w-full rounded-xl border border-control-border bg-surface px-4 py-2.5 text-ink placeholder:text-muted focus:border-brand-700 focus:outline-none focus:ring-4 focus:ring-focus-ring focus:ring-offset-2" %>
+  <% if errors_id %>
+    <ul id="<%= errors_id %>" role="alert" class="space-y-1 text-sm font-semibold text-danger-700">
+      <% field_errors.each do |error| %>
+        <li><%= error %></li>
+      <% end %>
+    </ul>
+  <% end %>
+</div>

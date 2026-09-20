@@ -1,0 +1,14 @@
+<%
+  variant_classes = {
+    primary: "bg-brand-700 text-white shadow-sm hover:bg-brand-800",
+    secondary: "border border-line bg-surface text-ink hover:border-brand-600 hover:bg-brand-50",
+    quiet: "text-brand-800 hover:bg-brand-50"
+  }
+  classes = "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-5 py-2.5 text-center text-sm font-bold transition-colors focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2 motion-reduce:transition-none #{variant_classes.fetch(variant, variant_classes[:primary])}"
+%>
+
+<% if local_assigns[:href].present? %>
+  <%= link_to label, href, class: classes %>
+<% else %>
+  <%= button_tag label, type: local_assigns.fetch(:type, "button"), class: classes, disabled: local_assigns.fetch(:disabled, false) %>
+<% end %>

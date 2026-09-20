@@ -1,0 +1,7 @@
+<article class="rounded-card border border-line bg-canvas p-5">
+  <% if local_assigns[:eyebrow].present? %>
+    <p class="text-xs font-bold uppercase tracking-widest text-brand-700"><%= eyebrow %></p>
+  <% end %>
+  <h2 class="mt-2 font-display text-xl font-bold text-ink"><%= title %></h2>
+  <p class="mt-2 leading-7 text-muted"><%= body %></p>
+</article>

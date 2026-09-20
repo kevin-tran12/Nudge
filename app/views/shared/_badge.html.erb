@@ -1,0 +1,12 @@
+<%
+  tone_classes = {
+    brand: "bg-brand-100 text-brand-800",
+    success: "bg-brand-100 text-brand-800",
+    warning: "bg-accent-100 text-accent-700",
+    danger: "bg-danger-50 text-danger-700"
+  }
+%>
+
+<span class="inline-flex min-h-7 items-center rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider <%= tone_classes.fetch(tone, tone_classes[:brand]) %>">
+  <%= label %>
+</span>
