@@ -37,6 +37,8 @@ docker build --target runtime --tag nudge:runtime .
 docker run --rm --env SECRET_KEY_BASE_DUMMY=1 nudge:runtime ruby test/runtime/production_image_contract.rb
 ```
 
+The repository separates quick tests from integration/contracts and enforces full-suite coverage. See [Testing and CI](docs/TESTING.md) for the lane commands, coverage floor, fixture guardrails, artifacts, and current browser-E2E status.
+
 Normal teardown preserves the database:
 
 ```bash

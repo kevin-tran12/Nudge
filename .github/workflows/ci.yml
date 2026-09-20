@@ -15,11 +15,94 @@ concurrency:
 env:
   COMPOSE_ANSI: never
   CI_IMAGE: nudge-ci:${{ github.sha }}
+  PROVIDER_MODE: fixture
+  RAILS_TEST_WORKERS: 1
   TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 
 jobs:
-  verify:
-    name: Test, quality, and security
+  tests:
+    name: Test lanes and coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build development image
+        run: docker compose build app
+
+      - name: Start database
+        run: docker compose up --detach --wait db
+
+      - name: Prepare test database
+        run: docker compose run --rm --no-deps -e RAILS_ENV=test app bin/rails db:prepare
+
+      - name: Run fast tests
+        shell: bash
+        run: |
+          mkdir -p tmp/test-results
+          set -o pipefail
+          docker compose run --rm --no-deps -e RAILS_ENV=test -e RAILS_TEST_WORKERS app bin/test-fast 2>&1 | tee tmp/test-results/fast.log
+
+      - name: Run integration and contract tests
+        shell: bash
+        run: |
+          set -o pipefail
+          docker compose run --rm --no-deps -e RAILS_ENV=test -e RAILS_TEST_WORKERS app bin/test-integration 2>&1 | tee tmp/test-results/integration.log
+
+      - name: Enforce full-suite coverage
+        shell: bash
+        run: |
+          set -o pipefail
+          docker compose run --rm --no-deps -e RAILS_ENV=test -e RAILS_TEST_WORKERS app bin/test-all 2>&1 | tee tmp/test-results/coverage.log
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-evidence-${{ github.run_id }}
+          path: |
+            coverage/
+            tmp/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Tear down test services
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  quality:
+    name: Ruby quality and application security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build development image
+        run: docker compose build app
+
+      - name: Check Ruby style
+        run: docker compose run --rm --no-deps app bin/rubocop
+
+      - name: Audit Ruby dependencies
+        run: docker compose run --rm --no-deps app bin/bundler-audit
+
+      - name: Scan Rails application
+        run: docker compose run --rm --no-deps app bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error
+
+      - name: Tear down quality services
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+
+  production-security:
+    name: Production build and security scans
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -31,27 +114,6 @@ jobs:
 
       - name: Validate Compose configuration
         run: docker compose config --quiet
-
-      - name: Build development image
-        run: docker compose build app
-
-      - name: Start database
-        run: docker compose up --detach --wait db
-
-      - name: Prepare test database
-        run: docker compose run --rm --no-deps -e RAILS_ENV=test app bin/rails db:prepare
-
-      - name: Run tests
-        run: docker compose run --rm --no-deps -e RAILS_ENV=test app bin/rails test
-
-      - name: Check Ruby style
-        run: docker compose run --rm --no-deps app bin/rubocop
-
-      - name: Audit Ruby dependencies
-        run: docker compose run --rm --no-deps app bin/bundler-audit
-
-      - name: Scan Rails application
-        run: docker compose run --rm --no-deps app bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error
 
       - name: Build production image
         run: docker build --target runtime --tag "$CI_IMAGE" .
@@ -70,6 +132,6 @@ jobs:
         # operating-system packages so Trivy never downloads its Java database.
         run: docker run --rm -v "/tmp:/scan" "$TRIVY_IMAGE" image --input /scan/nudge-image.tar --scanners vuln --pkg-types os --skip-java-db-update --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
 
-      - name: Tear down test services
+      - name: Tear down security services
         if: always()
         run: docker compose down --volumes --remove-orphans

@@ -61,4 +61,6 @@ group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"
+  # Enforce the repository's line and branch coverage baseline in the full test lane.
+  gem "simplecov", "~> 0.22", require: false
 end

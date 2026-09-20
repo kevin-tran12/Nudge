@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+
+ENV["RAILS_ENV"] = "test"
+ENV["TEST_LANE"] = "fast"
+
+require_relative "../test/support/test_lane"
+
+files = TestSupport::TestLane.files(:fast)
+abort "Fast test lane has no tests" if files.empty?
+
+exec({ "TEST_LANE" => "fast" }, File.expand_path("rails", __dir__), "test", *files, *ARGV)
