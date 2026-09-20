@@ -9,6 +9,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
   IDENTITY_MIGRATION_VERSION = "20260920000002"
   CATALOG_MIGRATION_VERSION = "20260920000003"
   CATALOG_EVIDENCE_MIGRATION_VERSION = "20260920000004"
+  SEARCH_MIGRATION_VERSION = "20260920000005"
   IDENTITY_TABLES = %w[
     agent_provider_sessions
     ai_access_grants
@@ -33,6 +34,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     price_observations inventory_observations sync_runs sync_checkpoints
     supplier_subscriptions
   ].freeze
+  SEARCH_TABLES = %w[search_documents embedding_models embeddings].freeze
 
   test "catalog evidence migration rolls back cleanly and survives redo and structure load" do
     with_database do |database, connection|
@@ -87,6 +89,51 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     end
   end
 
+  test "search and vector migration rolls back cleanly, redoes, and survives structure load without an approximate vector index" do
+    with_database do |database, connection|
+      Tempfile.create([ "db05-rollback", ".sql" ]) do |structure|
+        assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+        assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{SEARCH_MIGRATION_VERSION}", schema: structure.path)
+
+        SEARCH_TABLES.each do |table|
+          assert_nil connection.exec_params("SELECT to_regclass($1)", [ "public.#{table}" ]).getvalue(0, 0), table
+        end
+        %w[products product_variants].each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+
+        assert_command_succeeds run_rails(database, "db:migrate:redo", "VERSION=#{SEARCH_MIGRATION_VERSION}", schema: structure.path)
+        SEARCH_TABLES.each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+        assert_no_approximate_vector_index(connection)
+        assert_equal "1", connection.exec_params(<<~SQL).getvalue(0, 0)
+          SELECT count(*) FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'search_documents'
+            AND column_name = 'search_vector' AND is_generated = 'ALWAYS'
+        SQL
+
+        assert_command_succeeds run_rails(database, "db:schema:dump", schema: structure.path)
+        dumped = File.read(structure.path)
+        assert_includes dumped, Nudge::DatabaseCompatibility::PGVECTOR_STRUCTURE_STATEMENT
+        assert_includes dumped, "GENERATED ALWAYS AS (to_tsvector('english'::regconfig, normalized_text)) STORED"
+        assert_includes dumped, "index_embeddings_one_active_per_document_model"
+        refute_match(/USING (hnsw|ivfflat)/i, dumped)
+
+        with_database do |load_database, load_connection|
+          assert_command_succeeds run_rails(load_database, "db:schema:load", schema: structure.path)
+          SEARCH_TABLES.each do |table|
+            assert_equal table, load_connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+          end
+          assert_equal "0.8.5", load_connection.exec(<<~SQL).getvalue(0, 0)
+            SELECT extversion FROM pg_extension WHERE extname = 'vector'
+          SQL
+          assert_no_approximate_vector_index(load_connection)
+        end
+      end
+    end
+  end
+
   test "catalog migration rolls back completely and preserves its constraints through redo and schema load" do
     with_database do |database, connection|
       Tempfile.create([ "db03-rollback", ".sql" ]) do |structure|
@@ -95,6 +142,12 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           database,
           "db:migrate:down",
           "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{SEARCH_MIGRATION_VERSION}",
           schema: structure.path
         )
 
@@ -124,6 +177,12 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           database,
           "db:migrate:up",
           "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:up",
+          "VERSION=#{SEARCH_MIGRATION_VERSION}",
           schema: structure.path
         )
         CATALOG_TABLES.each do |table|
@@ -320,6 +379,16 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
         (product_id,fact_definition_id,json_value,value_schema_version,source_kind,observed_at,status,created_at,updated_at)
       VALUES (#{product_id},#{definition_id},'{}',1,'manual',CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     SQL
+  end
+
+  def assert_no_approximate_vector_index(connection)
+    count = connection.exec_params(<<~SQL).getvalue(0, 0)
+      SELECT count(*)
+      FROM pg_indexes
+      WHERE schemaname = 'public' AND tablename = 'embeddings'
+        AND (indexdef ILIKE '%USING hnsw%' OR indexdef ILIKE '%USING ivfflat%')
+    SQL
+    assert_equal "0", count
   end
 
   def assert_measurement_nan_guards(connection)
