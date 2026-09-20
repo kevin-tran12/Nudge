@@ -13,6 +13,7 @@ module Voice
       consent_required: :forbidden,
       verification_failed: :forbidden,
       grant_conflict: :conflict,
+      session_limit_reached: :too_many_requests,
       provider_unavailable: :service_unavailable
     }.freeze
 

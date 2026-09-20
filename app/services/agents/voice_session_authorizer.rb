@@ -18,6 +18,7 @@ module Agents
       CODES = %i[
         invalid_input demo_mode_unavailable session_bootstrap_failed
         consent_required verification_failed grant_conflict provider_unavailable
+        session_limit_reached
       ].freeze
 
       attr_reader :code
@@ -68,6 +69,12 @@ module Agents
     DEMO_EXPECTED_ACTION = "voice_session_demo_bootstrap"
     DEMO_VERIFICATION_FRESHNESS = 4.minutes
     NON_PRODUCTION_DEPLOYMENTS = %w[test development staging].freeze
+    # A publicly reachable demonstration mints provider grants without a real
+    # challenge, so one visitor must not be able to start conversations in a loop.
+    # This bounds a single shopper; it is not an abuse control. A visitor who
+    # discards their cookie gets a new session and a fresh allowance, and the
+    # durable protections are the provider-side concurrency and daily caps.
+    MAX_GRANTS_PER_SESSION = 5
     MAX_HOSTNAME_BYTES = 255
 
     def initialize(clock: -> { Time.current }, verification_token_generator: -> { SecureRandom.hex(24) },
@@ -92,6 +99,7 @@ module Agents
       consent = ensure_demo_consent!(shopping_session)
       verification = ensure_demo_verification!(shopping_session, expected_hostname)
 
+      refuse_over_session_limit!(shopping_session)
       revoke_active_grants!(shopping_session)
 
       grant_result = @issuer.call(
@@ -126,6 +134,13 @@ module Agents
     # Pressing the button again is an explicit re-authorization, so retire the
     # unusable grant first. The issuer's one-active-grant invariant is preserved:
     # the old grant is expired before a new one exists, under the session lock.
+    # Counts every grant ever issued to this session, not just live ones, so
+    # revoking and reissuing cannot be used to reset the allowance.
+    def refuse_over_session_limit!(shopping_session)
+      issued = shopping_session.ai_access_grants.count
+      raise Error.new(:session_limit_reached), cause: nil if issued >= MAX_GRANTS_PER_SESSION
+    end
+
     def revoke_active_grants!(shopping_session)
       shopping_session.with_lock do
         shopping_session.ai_access_grants.where(status: "active").find_each do |grant|
