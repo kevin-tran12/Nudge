@@ -53,11 +53,17 @@ module Integrations
 
       # The only place the mode-policy capability sentinel is supplied. Mode is
       # selected from the deployment/config snapshot (Rails.env and the frozen
-      # Config read once at boot), never from an inbound request: a caller that
-      # wants test-mode transport must be trusted server code passing the
-      # sentinel explicitly, mirroring Integrations::ElevenLabs::Adapter.
+      # Config read once at boot), never from an inbound request, a parameter,
+      # or anything else client-controlled, mirroring
+      # Integrations::ElevenLabs::Adapter. Config#test_mode? is true only when
+      # the server explicitly configured test mode AND credentials are present,
+      # so a misconfiguration degrades to fixture instead of failing open. An
+      # explicit capability: argument (trusted server code and tests) still
+      # works. There is no live-money mode to select: ModePolicy knows only
+      # :fixture and :test_mode.
       def self.build(capability: nil, deployment: Rails.env, config: Rails.application.config.x.stripe,
         clock: -> { Time.current }, http_client: nil)
+        capability = ModePolicy::TEST_MODE_CAPABILITY if capability.nil? && config.instance_of?(Config) && config.test_mode?
         mode = capability.nil? ? :fixture : :test_mode
         mode_policy = ModePolicy.new(deployment: deployment, mode: mode, capability: capability)
         new(mode_policy: mode_policy, config: config, clock: clock, http_client: http_client)
