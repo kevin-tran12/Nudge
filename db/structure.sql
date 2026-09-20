@@ -66,7 +66,7 @@ BEGIN
        (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_object_keys(NEW.allowed_values_schema))<>1 OR
        pg_catalog.jsonb_typeof(NEW.allowed_values_schema->'enum')<>'array' OR pg_catalog.jsonb_array_length(NEW.allowed_values_schema->'enum')=0
     THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_enum_invalid'; END IF;
-    IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements(NEW.allowed_values_schema->'enum') e WHERE pg_catalog.jsonb_typeof(e)<>'string' OR nullif(pg_catalog.btrim(e#>>'{}'),'') IS NULL) OR
+    IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements(NEW.allowed_values_schema->'enum') e WHERE pg_catalog.jsonb_typeof(e)<>'string' OR pg_catalog.octet_length(e#>>'{}') > 1024) OR
        (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_values_schema->'enum')) <>
        (SELECT pg_catalog.count(DISTINCT x) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_values_schema->'enum') x)
     THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_enum_invalid'; END IF;
@@ -137,7 +137,7 @@ CREATE FUNCTION public.db04_supplier_observation_guard() RETURNS trigger
 BEGIN
   IF TG_OP = 'DELETE' THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_delete_denied'; END IF;
   IF TG_OP = 'INSERT' THEN
-    IF NEW.purged_at IS NOT NULL THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_cannot_start_purged'; END IF;
+    IF NEW.purged_at IS NOT NULL THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purged_at_managed'; END IF;
     RETURN NEW;
   END IF;
   IF (NEW.id,NEW.supplier_id,NEW.resource_kind,NEW.external_resource_id,NEW.provider_request_id,NEW.endpoint_key,
@@ -148,16 +148,17 @@ BEGIN
       OLD.encryption_context)
   THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_immutable'; END IF;
   IF NEW.purge_after > OLD.purge_after THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_deadline_extension_denied'; END IF;
+  IF NEW.purged_at IS DISTINCT FROM OLD.purged_at
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purged_at_managed'; END IF;
   IF OLD.purged_at IS NOT NULL AND (NEW.purged_at IS DISTINCT FROM OLD.purged_at OR NEW.payload_ciphertext IS NOT NULL OR NEW.payload_json IS NOT NULL)
   THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_restore_denied'; END IF;
-  IF OLD.payload_json IS DISTINCT FROM NEW.payload_json THEN
-    IF NOT (NEW.payload_json IS NULL AND NEW.purged_at IS NOT NULL) THEN
-      RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_json_replacement_denied';
-    END IF;
+  IF OLD.purged_at IS NULL AND NEW.payload_ciphertext IS NULL AND NEW.payload_json IS NULL THEN
+    IF pg_catalog.statement_timestamp() < NEW.purge_after
+    THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purge_too_early'; END IF;
+    NEW.purged_at := pg_catalog.statement_timestamp();
+  ELSIF OLD.payload_json IS DISTINCT FROM NEW.payload_json THEN
+    RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_json_replacement_denied';
   END IF;
-  IF NEW.purged_at IS NOT NULL AND OLD.purged_at IS NULL AND
-     (CURRENT_TIMESTAMP < NEW.purge_after OR NEW.purged_at > CURRENT_TIMESTAMP)
-  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purge_too_early'; END IF;
   RETURN NEW;
 END $$;
 
@@ -511,7 +512,7 @@ CREATE TABLE public.fact_definitions (
     status text NOT NULL,
     created_at timestamp(6) with time zone NOT NULL,
     updated_at timestamp(6) with time zone NOT NULL,
-    CONSTRAINT fact_definitions_allowed_values_pair_check CHECK ((((data_type = 'enum'::text) AND (allowed_values_schema IS NOT NULL) AND (allowed_values_schema_version > 0)) OR ((data_type <> 'enum'::text) AND (allowed_values_schema IS NULL) AND (allowed_values_schema_version IS NULL)))),
+    CONSTRAINT fact_definitions_allowed_values_pair_check CHECK ((((data_type = 'enum'::text) AND (allowed_values_schema IS NOT NULL) AND (allowed_values_schema_version IS NOT NULL) AND (allowed_values_schema_version > 0)) OR ((data_type <> 'enum'::text) AND (allowed_values_schema IS NULL) AND (allowed_values_schema_version IS NULL)))),
     CONSTRAINT fact_definitions_measurement_check CHECK ((((data_type = 'measurement'::text) AND (NULLIF(btrim(unit_dimension), ''::text) IS NOT NULL) AND (NULLIF(btrim(canonical_unit), ''::text) IS NOT NULL)) OR ((data_type <> 'measurement'::text) AND (unit_dimension IS NULL) AND (canonical_unit IS NULL)))),
     CONSTRAINT fact_definitions_type_check CHECK ((data_type = ANY (ARRAY['boolean'::text, 'integer'::text, 'decimal'::text, 'text'::text, 'enum'::text, 'measurement'::text, 'json'::text]))),
     CONSTRAINT fact_definitions_versions_check CHECK (((allowed_operators_schema_version > 0) AND (version > 0)))
@@ -684,8 +685,8 @@ CREATE TABLE public.product_facts (
     CONSTRAINT product_facts_confidence_check CHECK (((confidence IS NULL) OR ((confidence <> ALL (ARRAY['NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric])) AND ((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))))),
     CONSTRAINT product_facts_decimal_finite_check CHECK (((decimal_value IS NULL) OR (decimal_value <> ALL (ARRAY['NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric])))),
     CONSTRAINT product_facts_evidence_check CHECK (((source_kind = 'manual'::text) OR (supplier_observation_id IS NOT NULL))),
-    CONSTRAINT product_facts_inference_check CHECK (((source_kind <> 'inferred'::text) OR ((NULLIF(btrim(inference_version), ''::text) IS NOT NULL) AND (confidence IS NOT NULL)))),
-    CONSTRAINT product_facts_json_check CHECK ((("json_value" IS NULL) OR ((jsonb_typeof("json_value") = ANY (ARRAY['object'::text, 'array'::text])) AND (value_schema_version > 0)))),
+    CONSTRAINT product_facts_inference_check CHECK ((((source_kind = 'inferred'::text) AND (NULLIF(btrim(inference_version), ''::text) IS NOT NULL) AND (confidence IS NOT NULL)) OR ((source_kind <> 'inferred'::text) AND (inference_version IS NULL)))),
+    CONSTRAINT product_facts_json_check CHECK ((("json_value" IS NULL) OR ((jsonb_typeof("json_value") = ANY (ARRAY['object'::text, 'array'::text])) AND (value_schema_version IS NOT NULL) AND (value_schema_version > 0)))),
     CONSTRAINT product_facts_not_self_superseding_check CHECK (((supersedes_product_fact_id IS NULL) OR (supersedes_product_fact_id <> id))),
     CONSTRAINT product_facts_source_check CHECK ((source_kind = ANY (ARRAY['supplier'::text, 'normalized'::text, 'inferred'::text, 'manual'::text]))),
     CONSTRAINT product_facts_status_check CHECK ((status = ANY (ARRAY['active'::text, 'superseded'::text, 'rejected'::text]))),
@@ -1822,13 +1823,6 @@ CREATE UNIQUE INDEX index_catalog_media_on_encryption_context ON public.catalog_
 
 
 --
--- Name: index_catalog_media_on_product; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_catalog_media_on_product ON public.catalog_media USING btree (product_id) WHERE (product_id IS NOT NULL);
-
-
---
 -- Name: index_catalog_media_on_supplier_observation_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1836,24 +1830,17 @@ CREATE INDEX index_catalog_media_on_supplier_observation_id ON public.catalog_me
 
 
 --
--- Name: index_catalog_media_on_variant; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_catalog_media_on_variant ON public.catalog_media USING btree (product_variant_id) WHERE (product_variant_id IS NOT NULL);
-
-
---
 -- Name: index_catalog_media_product_position; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_catalog_media_product_position ON public.catalog_media USING btree (product_id, "position") WHERE (product_id IS NOT NULL);
+CREATE INDEX index_catalog_media_product_position ON public.catalog_media USING btree (product_id, "position", id) WHERE (product_id IS NOT NULL);
 
 
 --
 -- Name: index_catalog_media_variant_position; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_catalog_media_variant_position ON public.catalog_media USING btree (product_variant_id, "position") WHERE (product_variant_id IS NOT NULL);
+CREATE INDEX index_catalog_media_variant_position ON public.catalog_media USING btree (product_variant_id, "position", id) WHERE (product_variant_id IS NOT NULL);
 
 
 --
@@ -1944,7 +1931,7 @@ CREATE UNIQUE INDEX index_fact_definitions_on_key ON public.fact_definitions USI
 -- Name: index_inventory_observations_current; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_inventory_observations_current ON public.inventory_observations USING btree (supplier_variant_id, supplier_warehouse_id, observed_at DESC);
+CREATE INDEX index_inventory_observations_current ON public.inventory_observations USING btree (supplier_variant_id, supplier_warehouse_id, observed_at DESC, id DESC);
 
 
 --
@@ -1965,7 +1952,7 @@ CREATE UNIQUE INDEX index_inventory_observations_unique_source ON public.invento
 -- Name: index_price_observations_current; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_price_observations_current ON public.price_observations USING btree (supplier_variant_id, price_kind, currency, observed_at DESC);
+CREATE INDEX index_price_observations_current ON public.price_observations USING btree (supplier_variant_id, price_kind, currency, observed_at DESC, id DESC);
 
 
 --
@@ -1990,59 +1977,31 @@ CREATE UNIQUE INDEX index_product_categories_on_product_id_and_category_id ON pu
 
 
 --
--- Name: index_product_facts_active_product_boolean; Type: INDEX; Schema: public; Owner: -
+-- Name: index_product_facts_active_boolean; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_product_boolean ON public.product_facts USING btree (fact_definition_id, boolean_value, product_id) WHERE ((status = 'active'::text) AND (product_id IS NOT NULL));
-
-
---
--- Name: index_product_facts_active_product_decimal; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_product_facts_active_product_decimal ON public.product_facts USING btree (fact_definition_id, decimal_value, product_id) WHERE ((status = 'active'::text) AND (product_id IS NOT NULL));
+CREATE INDEX index_product_facts_active_boolean ON public.product_facts USING btree (fact_definition_id, boolean_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (boolean_value IS NOT NULL));
 
 
 --
--- Name: index_product_facts_active_product_integer; Type: INDEX; Schema: public; Owner: -
+-- Name: index_product_facts_active_decimal; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_product_integer ON public.product_facts USING btree (fact_definition_id, integer_value, product_id) WHERE ((status = 'active'::text) AND (product_id IS NOT NULL));
-
-
---
--- Name: index_product_facts_active_product_text; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_product_facts_active_product_text ON public.product_facts USING btree (fact_definition_id, text_value, product_id) WHERE ((status = 'active'::text) AND (product_id IS NOT NULL));
+CREATE INDEX index_product_facts_active_decimal ON public.product_facts USING btree (fact_definition_id, decimal_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (decimal_value IS NOT NULL));
 
 
 --
--- Name: index_product_facts_active_variant_boolean; Type: INDEX; Schema: public; Owner: -
+-- Name: index_product_facts_active_integer; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_variant_boolean ON public.product_facts USING btree (fact_definition_id, boolean_value, product_variant_id) WHERE ((status = 'active'::text) AND (product_variant_id IS NOT NULL));
-
-
---
--- Name: index_product_facts_active_variant_decimal; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_product_facts_active_variant_decimal ON public.product_facts USING btree (fact_definition_id, decimal_value, product_variant_id) WHERE ((status = 'active'::text) AND (product_variant_id IS NOT NULL));
+CREATE INDEX index_product_facts_active_integer ON public.product_facts USING btree (fact_definition_id, integer_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (integer_value IS NOT NULL));
 
 
 --
--- Name: index_product_facts_active_variant_integer; Type: INDEX; Schema: public; Owner: -
+-- Name: index_product_facts_active_text; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_product_facts_active_variant_integer ON public.product_facts USING btree (fact_definition_id, integer_value, product_variant_id) WHERE ((status = 'active'::text) AND (product_variant_id IS NOT NULL));
-
-
---
--- Name: index_product_facts_active_variant_text; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_product_facts_active_variant_text ON public.product_facts USING btree (fact_definition_id, text_value, product_variant_id) WHERE ((status = 'active'::text) AND (product_variant_id IS NOT NULL));
+CREATE INDEX index_product_facts_active_text ON public.product_facts USING btree (fact_definition_id, text_value, product_id, product_variant_id, id) WHERE ((status = 'active'::text) AND (text_value IS NOT NULL));
 
 
 --
@@ -2147,7 +2106,7 @@ CREATE INDEX index_shopping_sessions_on_user_id_and_status ON public.shopping_se
 -- Name: index_supplier_observations_normalization_queue; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_supplier_observations_normalization_queue ON public.supplier_observations USING btree (normalization_status, received_at) WHERE ((purged_at IS NULL) AND (normalization_status = ANY (ARRAY['pending'::text, 'failed'::text])));
+CREATE INDEX index_supplier_observations_normalization_queue ON public.supplier_observations USING btree (normalization_status, received_at, id) WHERE ((purged_at IS NULL) AND (normalization_status = ANY (ARRAY['pending'::text, 'failed'::text])));
 
 
 --
@@ -2175,7 +2134,7 @@ CREATE INDEX index_supplier_observations_on_supplier_id ON public.supplier_obser
 -- Name: index_supplier_observations_purge_queue; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_supplier_observations_purge_queue ON public.supplier_observations USING btree (purge_after) WHERE (purged_at IS NULL);
+CREATE INDEX index_supplier_observations_purge_queue ON public.supplier_observations USING btree (purge_after, id) WHERE (purged_at IS NULL);
 
 
 --
@@ -2245,7 +2204,7 @@ CREATE UNIQUE INDEX index_supplier_subscriptions_provider_ref ON public.supplier
 -- Name: index_supplier_subscriptions_retry; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_supplier_subscriptions_retry ON public.supplier_subscriptions USING btree (next_retry_at) WHERE ((next_retry_at IS NOT NULL) AND (closed_at IS NULL));
+CREATE INDEX index_supplier_subscriptions_retry ON public.supplier_subscriptions USING btree (next_retry_at, id) WHERE ((next_retry_at IS NOT NULL) AND (closed_at IS NULL));
 
 
 --
@@ -2329,7 +2288,7 @@ CREATE INDEX index_sync_runs_on_supplier_id ON public.sync_runs USING btree (sup
 -- Name: index_sync_runs_scope_chronology; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_sync_runs_scope_chronology ON public.sync_runs USING btree (supplier_id, resource_kind, scope_key, created_at DESC);
+CREATE INDEX index_sync_runs_scope_chronology ON public.sync_runs USING btree (supplier_id, resource_kind, scope_key, created_at DESC, id DESC);
 
 
 --
@@ -2458,7 +2417,7 @@ ALTER TABLE ONLY public.ai_access_grants
 --
 
 ALTER TABLE ONLY public.inventory_observations
-    ADD CONSTRAINT fk_inventory_observations_source_supplier FOREIGN KEY (supplier_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_inventory_observations_source_supplier FOREIGN KEY (supplier_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2466,7 +2425,7 @@ ALTER TABLE ONLY public.inventory_observations
 --
 
 ALTER TABLE ONLY public.inventory_observations
-    ADD CONSTRAINT fk_inventory_observations_variant_supplier FOREIGN KEY (supplier_variant_id, supplier_id) REFERENCES public.supplier_variants(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_inventory_observations_variant_supplier FOREIGN KEY (supplier_variant_id, supplier_id) REFERENCES public.supplier_variants(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2474,7 +2433,7 @@ ALTER TABLE ONLY public.inventory_observations
 --
 
 ALTER TABLE ONLY public.inventory_observations
-    ADD CONSTRAINT fk_inventory_observations_warehouse_supplier FOREIGN KEY (supplier_warehouse_id, supplier_id) REFERENCES public.supplier_warehouses(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_inventory_observations_warehouse_supplier FOREIGN KEY (supplier_warehouse_id, supplier_id) REFERENCES public.supplier_warehouses(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2482,7 +2441,7 @@ ALTER TABLE ONLY public.inventory_observations
 --
 
 ALTER TABLE ONLY public.price_observations
-    ADD CONSTRAINT fk_price_observations_source_supplier FOREIGN KEY (supplier_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_price_observations_source_supplier FOREIGN KEY (supplier_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2490,7 +2449,7 @@ ALTER TABLE ONLY public.price_observations
 --
 
 ALTER TABLE ONLY public.price_observations
-    ADD CONSTRAINT fk_price_observations_variant_supplier FOREIGN KEY (supplier_variant_id, supplier_id) REFERENCES public.supplier_variants(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_price_observations_variant_supplier FOREIGN KEY (supplier_variant_id, supplier_id) REFERENCES public.supplier_variants(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2754,7 +2713,7 @@ ALTER TABLE ONLY public.catalog_media
 --
 
 ALTER TABLE ONLY public.supplier_products
-    ADD CONSTRAINT fk_supplier_products_latest_observation FOREIGN KEY (latest_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_supplier_products_latest_observation FOREIGN KEY (latest_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2762,7 +2721,7 @@ ALTER TABLE ONLY public.supplier_products
 --
 
 ALTER TABLE ONLY public.supplier_subscriptions
-    ADD CONSTRAINT fk_supplier_subscriptions_product_supplier FOREIGN KEY (supplier_product_id, supplier_id) REFERENCES public.supplier_products(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_supplier_subscriptions_product_supplier FOREIGN KEY (supplier_product_id, supplier_id) REFERENCES public.supplier_products(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -2770,7 +2729,7 @@ ALTER TABLE ONLY public.supplier_subscriptions
 --
 
 ALTER TABLE ONLY public.supplier_variants
-    ADD CONSTRAINT fk_supplier_variants_latest_observation FOREIGN KEY (latest_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_supplier_variants_latest_observation FOREIGN KEY (latest_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --

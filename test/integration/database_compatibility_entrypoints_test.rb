@@ -61,6 +61,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           WHERE conname IN ('fk_supplier_products_latest_observation','fk_supplier_variants_latest_observation')
             AND convalidated
         SQL
+        assert_db04_schema_version_guards connection
 
         assert_command_succeeds run_rails(database, "db:schema:dump", schema: structure.path)
         dumped = File.read(structure.path)
@@ -80,6 +81,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
               AND prosecdef = false
               AND proconfig = ARRAY['search_path=pg_catalog']
           SQL
+          assert_db04_schema_version_guards load_connection
         end
       end
     end
@@ -276,6 +278,49 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
   end
 
   private
+
+  def assert_db04_schema_version_guards(connection)
+    [ "NULL", "0" ].each_with_index do |version, index|
+      assert_raises(PG::CheckViolation) do
+        connection.exec(<<~SQL)
+          INSERT INTO fact_definitions
+            (key,label,data_type,allowed_operators,allowed_operators_schema_version,allowed_values_schema,
+             allowed_values_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+          VALUES ('invalid-enum-#{index}','Enum','enum','[]',1,'{"enum":[""]}',#{version},false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        SQL
+      end
+    end
+    connection.exec(<<~SQL)
+      INSERT INTO fact_definitions
+        (key,label,data_type,allowed_operators,allowed_operators_schema_version,allowed_values_schema,
+         allowed_values_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+      VALUES ('valid-enum','Enum','enum','[]',1,'{"enum":[""]}',1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    SQL
+
+    product_id = connection.exec(<<~SQL).getvalue(0, 0)
+      INSERT INTO products (status,title,description,lock_version,created_at,updated_at)
+      VALUES ('draft','Version guard','',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id
+    SQL
+    definition_id = connection.exec(<<~SQL).getvalue(0, 0)
+      INSERT INTO fact_definitions
+        (key,label,data_type,allowed_operators,allowed_operators_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+      VALUES ('json-guard','JSON','json','[]',1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id
+    SQL
+    [ "NULL", "0" ].each do |version|
+      assert_raises(PG::CheckViolation) do
+        connection.exec(<<~SQL)
+          INSERT INTO product_facts
+            (product_id,fact_definition_id,json_value,value_schema_version,source_kind,observed_at,status,created_at,updated_at)
+          VALUES (#{product_id},#{definition_id},'{}',#{version},'manual',CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        SQL
+      end
+    end
+    connection.exec(<<~SQL)
+      INSERT INTO product_facts
+        (product_id,fact_definition_id,json_value,value_schema_version,source_kind,observed_at,status,created_at,updated_at)
+      VALUES (#{product_id},#{definition_id},'{}',1,'manual',CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    SQL
+  end
 
   def assert_measurement_nan_guards(connection)
     %w[

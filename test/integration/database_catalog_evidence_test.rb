@@ -62,12 +62,32 @@ class DatabaseCatalogEvidenceTest < ActiveSupport::TestCase
     assert_database_error do
       insert_observation(supplier_id: supplier_id, payload_json: "[]")
     end
+    assert_database_error("supplier_observation_purged_at_managed") do
+      connection.execute(<<~SQL)
+        INSERT INTO supplier_observations
+          (supplier_id,resource_kind,external_resource_id,endpoint_key,adapter_version,payload_schema_version,
+           payload_sha256,observed_at,received_at,purge_after,purged_at,created_at)
+        VALUES (#{supplier_id},'product','caller-purged','catalog','v1',1,decode(repeat('ab',32),'hex'),
+          CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      SQL
+    end
     assert_database_error do
       connection.execute("UPDATE supplier_observations SET payload_json = NULL, purged_at = CURRENT_TIMESTAMP WHERE id = #{observation_id}")
     end
     connection.execute("UPDATE supplier_observations SET purge_after = CURRENT_TIMESTAMP WHERE id = #{observation_id}")
-    connection.execute("UPDATE supplier_observations SET payload_json = NULL, purged_at = CURRENT_TIMESTAMP WHERE id = #{observation_id}")
+    assert_database_error("supplier_observation_purged_at_managed") do
+      connection.execute("UPDATE supplier_observations SET payload_json = NULL, purged_at = CURRENT_TIMESTAMP WHERE id = #{observation_id}")
+    end
+    before_purge = connection.select_value("SELECT statement_timestamp()")
+    connection.execute("UPDATE supplier_observations SET payload_json = NULL WHERE id = #{observation_id}")
     assert_nil connection.select_value("SELECT payload_json FROM supplier_observations WHERE id = #{observation_id}")
+    purged_at = connection.select_value("SELECT purged_at FROM supplier_observations WHERE id = #{observation_id}")
+    after_purge = connection.select_value("SELECT statement_timestamp()")
+    assert_operator purged_at, :>=, before_purge
+    assert_operator purged_at, :<=, after_purge
+    assert_database_error("supplier_observation_purged_at_managed") do
+      connection.execute("UPDATE supplier_observations SET purged_at = purged_at + interval '1 second' WHERE id = #{observation_id}")
+    end
     assert_database_error("supplier_observation_restore_denied") do
       connection.execute("UPDATE supplier_observations SET payload_json = '{\"restored\":true}'::jsonb WHERE id = #{observation_id}")
     end
@@ -174,6 +194,111 @@ class DatabaseCatalogEvidenceTest < ActiveSupport::TestCase
         VALUES ('bad.enum','Bad','enum','[]',1,'{"enum":["x","x"]}',1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
       SQL
     end
+
+    assert_database_error do
+      connection.execute(<<~SQL)
+        INSERT INTO fact_definitions
+          (key,label,data_type,allowed_operators,allowed_operators_schema_version,allowed_values_schema,hard_eligibility_supported,version,status,created_at,updated_at)
+        VALUES ('missing.enum.version','Enum','enum','[]',1,'{"enum":[""]}',false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      SQL
+    end
+
+    boundary = "é" * 512
+    oversized = boundary + "x"
+    connection.execute(<<~SQL)
+      INSERT INTO fact_definitions
+        (key,label,data_type,allowed_operators,allowed_operators_schema_version,allowed_values_schema,allowed_values_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+      VALUES ('enum.boundary','Enum','enum','[]',1,#{connection.quote({ enum: [ "", boundary ] }.to_json)}::jsonb,1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    SQL
+    assert_database_error("fact_definition_enum_invalid") do
+      connection.execute(<<~SQL)
+        INSERT INTO fact_definitions
+          (key,label,data_type,allowed_operators,allowed_operators_schema_version,allowed_values_schema,allowed_values_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+        VALUES ('enum.oversized','Enum','enum','[]',1,#{connection.quote({ enum: [ oversized ] }.to_json)}::jsonb,1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      SQL
+    end
+  end
+
+
+  test "requires JSON value versions and confines inference metadata" do
+    supplier_id = insert_supplier
+    product_id = insert_product
+    observation_id = insert_observation(supplier_id:)
+    json_definition_id = connection.select_value(<<~SQL).to_i
+      INSERT INTO fact_definitions
+        (key,label,data_type,allowed_operators,allowed_operators_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+      VALUES ('json.v1','JSON','json','[]',1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id
+    SQL
+    assert_database_error do
+      connection.execute(<<~SQL)
+        INSERT INTO product_facts
+          (product_id,fact_definition_id,json_value,source_kind,supplier_observation_id,observed_at,status,created_at,updated_at)
+        VALUES (#{product_id},#{json_definition_id},'{}','supplier',#{observation_id},CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      SQL
+    end
+    connection.execute(<<~SQL)
+      INSERT INTO product_facts
+        (product_id,fact_definition_id,json_value,value_schema_version,source_kind,supplier_observation_id,observed_at,status,created_at,updated_at)
+      VALUES (#{product_id},#{json_definition_id},'{}',1,'supplier',#{observation_id},CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    SQL
+
+    definition_id = insert_definition
+    assert_database_error do
+      connection.execute(<<~SQL)
+        INSERT INTO product_facts
+          (product_id,fact_definition_id,decimal_value,canonical_unit,source_kind,supplier_observation_id,confidence,inference_version,observed_at,status,created_at,updated_at)
+        VALUES (#{product_id},#{definition_id},1,'g','supplier',#{observation_id},0.5,'model',CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      SQL
+    end
+    assert_database_error do
+      connection.execute(<<~SQL)
+        INSERT INTO product_facts
+          (product_id,fact_definition_id,decimal_value,canonical_unit,source_kind,supplier_observation_id,confidence,observed_at,status,created_at,updated_at)
+        VALUES (#{product_id},#{definition_id},1,'g','inferred',#{observation_id},0.5,CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      SQL
+    end
+  end
+
+  test "uses exact operational indexes without redundant media or typed-fact variants" do
+    media = connection.indexes("catalog_media")
+    assert_equal 2, media.count { |index| index.name.match?(/position/) }
+    refute media.any? { |index| %w[index_catalog_media_on_product index_catalog_media_on_variant].include?(index.name) }
+    assert_index("catalog_media", "index_catalog_media_product_position", %w[product_id position id], "(product_id IS NOT NULL)")
+    assert_index("catalog_media", "index_catalog_media_variant_position", %w[product_variant_id position id], "(product_variant_id IS NOT NULL)")
+
+    typed = connection.indexes("product_facts").select { |index| index.name.start_with?("index_product_facts_active_") }
+    assert_equal 4, typed.size
+    %w[boolean integer decimal text].each do |kind|
+      assert_index("product_facts", "index_product_facts_active_#{kind}", [ "fact_definition_id", "#{kind}_value", "product_id", "product_variant_id", "id" ], "((status = 'active'::text) AND (#{kind}_value IS NOT NULL))")
+    end
+
+    assert_equal %w[supplier_variant_id price_kind currency observed_at id], connection.indexes("price_observations").find { |index| index.name == "index_price_observations_current" }.columns
+    assert_equal %w[supplier_variant_id supplier_warehouse_id observed_at id], connection.indexes("inventory_observations").find { |index| index.name == "index_inventory_observations_current" }.columns
+    assert_equal %w[supplier_id resource_kind scope_key created_at id], connection.indexes("sync_runs").find { |index| index.name == "index_sync_runs_scope_chronology" }.columns
+    assert_equal %w[next_retry_at id], connection.indexes("supplier_subscriptions").find { |index| index.name == "index_supplier_subscriptions_retry" }.columns
+    assert_equal %w[normalization_status received_at id], connection.indexes("supplier_observations").find { |index| index.name == "index_supplier_observations_normalization_queue" }.columns
+    assert_equal %w[purge_after id], connection.indexes("supplier_observations").find { |index| index.name == "index_supplier_observations_purge_queue" }.columns
+  end
+
+  test "makes supplier scoped foreign keys immediate restrictive and nondeferrable" do
+    names = %w[
+      fk_price_observations_variant_supplier fk_price_observations_source_supplier
+      fk_inventory_observations_variant_supplier fk_inventory_observations_warehouse_supplier
+      fk_inventory_observations_source_supplier fk_supplier_subscriptions_product_supplier
+      fk_supplier_products_latest_observation fk_supplier_variants_latest_observation
+    ]
+    rows = connection.exec_query(<<~SQL).to_a.index_by { |row| row.fetch("conname") }
+      SELECT conname, confupdtype, confdeltype, condeferrable, condeferred
+      FROM pg_constraint
+      WHERE conname IN (#{names.map { |name| connection.quote(name) }.join(',')})
+    SQL
+    assert_equal names.sort, rows.keys.sort
+    rows.each_value do |row|
+      assert_equal "r", row.fetch("confupdtype")
+      assert_equal "r", row.fetch("confdeltype")
+      assert_equal false, row.fetch("condeferrable")
+      assert_equal false, row.fetch("condeferred")
+    end
   end
 
   test "enforces supplier scoped price and inventory evidence" do
@@ -257,6 +382,13 @@ class DatabaseCatalogEvidenceTest < ActiveSupport::TestCase
 
   def index_columns(table, unique)
     connection.indexes(table).select { |index| index.unique == unique }.map(&:columns)
+  end
+
+  def assert_index(table, name, columns, predicate)
+    index = connection.indexes(table).find { |candidate| candidate.name == name }
+    assert index, name
+    assert_equal columns, index.columns
+    assert_equal predicate, index.where
   end
 
   def assert_database_error(message = nil)

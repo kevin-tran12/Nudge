@@ -68,8 +68,8 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :supplier_observations, %i[id supplier_id], unique: true
     add_index :supplier_observations, :encryption_context, unique: true
     add_index :supplier_observations, %i[supplier_id resource_kind external_resource_id observed_at id], order: { observed_at: :desc, id: :desc }, name: "index_supplier_observations_resource_chronology"
-    add_index :supplier_observations, %i[normalization_status received_at], where: "purged_at IS NULL AND normalization_status IN ('pending','failed')", name: "index_supplier_observations_normalization_queue"
-    add_index :supplier_observations, :purge_after, where: "purged_at IS NULL", name: "index_supplier_observations_purge_queue"
+    add_index :supplier_observations, %i[normalization_status received_at id], where: "purged_at IS NULL AND normalization_status IN ('pending','failed')", name: "index_supplier_observations_normalization_queue"
+    add_index :supplier_observations, %i[purge_after id], where: "purged_at IS NULL", name: "index_supplier_observations_purge_queue"
     add_foreign_key :supplier_observations, :suppliers, on_delete: :restrict
     add_check_constraint :supplier_observations, "payload_schema_version > 0", name: "supplier_observations_payload_version_check"
     add_check_constraint :supplier_observations, "octet_length(payload_sha256) = 32", name: "supplier_observations_hash_check"
@@ -103,10 +103,8 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
       t.datetime :verified_at
       t.timestamps null: false
     end
-    add_index :catalog_media, :product_id, where: "product_id IS NOT NULL", name: "index_catalog_media_on_product"
-    add_index :catalog_media, :product_variant_id, where: "product_variant_id IS NOT NULL", name: "index_catalog_media_on_variant"
-    add_index :catalog_media, %i[product_id position], where: "product_id IS NOT NULL", name: "index_catalog_media_product_position"
-    add_index :catalog_media, %i[product_variant_id position], where: "product_variant_id IS NOT NULL", name: "index_catalog_media_variant_position"
+    add_index :catalog_media, %i[product_id position id], where: "product_id IS NOT NULL", name: "index_catalog_media_product_position"
+    add_index :catalog_media, %i[product_variant_id position id], where: "product_variant_id IS NOT NULL", name: "index_catalog_media_variant_position"
     add_index :catalog_media, :supplier_observation_id
     add_index :catalog_media, :encryption_context, unique: true
     add_foreign_key :catalog_media, :products, on_delete: :cascade
@@ -145,7 +143,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
       (data_type <> 'measurement' AND unit_dimension IS NULL AND canonical_unit IS NULL)
     SQL
     add_check_constraint :fact_definitions, <<~SQL.squish, name: "fact_definitions_allowed_values_pair_check"
-      (data_type = 'enum' AND allowed_values_schema IS NOT NULL AND allowed_values_schema_version > 0) OR
+      (data_type = 'enum' AND allowed_values_schema IS NOT NULL AND allowed_values_schema_version IS NOT NULL AND allowed_values_schema_version > 0) OR
       (data_type <> 'enum' AND allowed_values_schema IS NULL AND allowed_values_schema_version IS NULL)
     SQL
   end
@@ -180,8 +178,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :product_facts, :supersedes_product_fact_id
     %w[boolean integer decimal text].each do |kind|
       column = "#{kind}_value"
-      add_index :product_facts, [ :fact_definition_id, column, :product_id ], where: "status = 'active' AND product_id IS NOT NULL", name: "index_product_facts_active_product_#{kind}"
-      add_index :product_facts, [ :fact_definition_id, column, :product_variant_id ], where: "status = 'active' AND product_variant_id IS NOT NULL", name: "index_product_facts_active_variant_#{kind}"
+      add_index :product_facts, [ :fact_definition_id, column, :product_id, :product_variant_id, :id ], where: "status = 'active' AND #{column} IS NOT NULL", name: "index_product_facts_active_#{kind}"
     end
     add_foreign_key :product_facts, :products, on_delete: :cascade
     add_foreign_key :product_facts, :product_variants, on_delete: :cascade
@@ -195,10 +192,10 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_check_constraint :product_facts, "decimal_value IS NULL OR decimal_value NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)", name: "product_facts_decimal_finite_check"
     add_check_constraint :product_facts, "confidence IS NULL OR (confidence NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric) AND confidence BETWEEN 0 AND 1)", name: "product_facts_confidence_check"
     add_check_constraint :product_facts, "text_value IS NULL OR octet_length(text_value) <= 1024", name: "product_facts_text_bound_check"
-    add_check_constraint :product_facts, "json_value IS NULL OR (jsonb_typeof(json_value) IN ('object','array') AND value_schema_version > 0)", name: "product_facts_json_check"
+    add_check_constraint :product_facts, "json_value IS NULL OR (jsonb_typeof(json_value) IN ('object','array') AND value_schema_version IS NOT NULL AND value_schema_version > 0)", name: "product_facts_json_check"
     add_check_constraint :product_facts, "json_value IS NOT NULL OR value_schema_version IS NULL", name: "product_facts_value_version_check"
     add_check_constraint :product_facts, "source_kind = 'manual' OR supplier_observation_id IS NOT NULL", name: "product_facts_evidence_check"
-    add_check_constraint :product_facts, "source_kind <> 'inferred' OR (nullif(btrim(inference_version),'') IS NOT NULL AND confidence IS NOT NULL)", name: "product_facts_inference_check"
+    add_check_constraint :product_facts, "(source_kind = 'inferred' AND nullif(btrim(inference_version),'') IS NOT NULL AND confidence IS NOT NULL) OR (source_kind <> 'inferred' AND inference_version IS NULL)", name: "product_facts_inference_check"
     add_check_constraint :product_facts, "valid_until IS NULL OR valid_from IS NULL OR valid_until >= valid_from", name: "product_facts_validity_check"
     add_check_constraint :product_facts, "supersedes_product_fact_id IS NULL OR supersedes_product_fact_id <> id", name: "product_facts_not_self_superseding_check"
   end
@@ -219,10 +216,10 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :price_observations, %i[supplier_variant_id supplier_id]
     add_index :price_observations, :supplier_id
     add_index :price_observations, %i[supplier_observation_id supplier_id]
-    add_index :price_observations, %i[supplier_variant_id price_kind currency observed_at], order: { observed_at: :desc }, name: "index_price_observations_current"
+    add_index :price_observations, %i[supplier_variant_id price_kind currency observed_at id], order: { observed_at: :desc, id: :desc }, name: "index_price_observations_current"
     add_foreign_key :price_observations, :suppliers, on_delete: :restrict
-    add_foreign_key :price_observations, :supplier_variants, column: %i[supplier_variant_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, name: "fk_price_observations_variant_supplier"
-    add_foreign_key :price_observations, :supplier_observations, column: %i[supplier_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, name: "fk_price_observations_source_supplier"
+    add_foreign_key :price_observations, :supplier_variants, column: %i[supplier_variant_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_price_observations_variant_supplier"
+    add_foreign_key :price_observations, :supplier_observations, column: %i[supplier_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_price_observations_source_supplier"
     add_check_constraint :price_observations, "amount_minor >= 0", name: "price_observations_amount_check"
     add_check_constraint :price_observations, "currency ~ '^[A-Z]{3}$'", name: "price_observations_currency_check"
     add_check_constraint :price_observations, "quantity_tier IS NULL OR quantity_tier > 0", name: "price_observations_tier_check"
@@ -248,11 +245,11 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :inventory_observations, :supplier_id
     add_index :inventory_observations, %i[supplier_warehouse_id supplier_id]
     add_index :inventory_observations, %i[supplier_observation_id supplier_id]
-    add_index :inventory_observations, %i[supplier_variant_id supplier_warehouse_id observed_at], order: { observed_at: :desc }, name: "index_inventory_observations_current"
+    add_index :inventory_observations, %i[supplier_variant_id supplier_warehouse_id observed_at id], order: { observed_at: :desc, id: :desc }, name: "index_inventory_observations_current"
     add_foreign_key :inventory_observations, :suppliers, on_delete: :restrict
-    add_foreign_key :inventory_observations, :supplier_variants, column: %i[supplier_variant_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, name: "fk_inventory_observations_variant_supplier"
-    add_foreign_key :inventory_observations, :supplier_warehouses, column: %i[supplier_warehouse_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, name: "fk_inventory_observations_warehouse_supplier"
-    add_foreign_key :inventory_observations, :supplier_observations, column: %i[supplier_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, name: "fk_inventory_observations_source_supplier"
+    add_foreign_key :inventory_observations, :supplier_variants, column: %i[supplier_variant_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_inventory_observations_variant_supplier"
+    add_foreign_key :inventory_observations, :supplier_warehouses, column: %i[supplier_warehouse_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_inventory_observations_warehouse_supplier"
+    add_foreign_key :inventory_observations, :supplier_observations, column: %i[supplier_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_inventory_observations_source_supplier"
     add_check_constraint :inventory_observations, "num_nonnulls(total_quantity,cj_quantity,factory_quantity) >= 1", name: "inventory_observations_quantity_present_check"
     add_check_constraint :inventory_observations, "(total_quantity IS NULL OR total_quantity >= 0) AND (cj_quantity IS NULL OR cj_quantity >= 0) AND (factory_quantity IS NULL OR factory_quantity >= 0)", name: "inventory_observations_quantities_check"
     add_check_constraint :inventory_observations, "valid_until IS NULL OR valid_until >= observed_at", name: "inventory_observations_validity_check"
@@ -281,7 +278,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     end
     add_index :sync_runs, :public_id, unique: true
     add_index :sync_runs, :supplier_id
-    add_index :sync_runs, %i[supplier_id resource_kind scope_key created_at], order: { created_at: :desc }, name: "index_sync_runs_scope_chronology"
+    add_index :sync_runs, %i[supplier_id resource_kind scope_key created_at id], order: { created_at: :desc, id: :desc }, name: "index_sync_runs_scope_chronology"
     add_foreign_key :sync_runs, :suppliers, on_delete: :restrict
     add_check_constraint :sync_runs, "mode IN ('fixture','verify','record','live')", name: "sync_runs_mode_check"
     add_check_constraint :sync_runs, "status IN ('pending','running','succeeded','failed','cancelled')", name: "sync_runs_status_check"
@@ -329,9 +326,9 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
     add_index :supplier_subscriptions, %i[supplier_product_id supplier_id]
     add_index :supplier_subscriptions, %i[supplier_id topic digest_key_version external_ref_digest], unique: true, where: "external_ref_digest IS NOT NULL", name: "index_supplier_subscriptions_provider_ref"
     add_index :supplier_subscriptions, :encryption_context, unique: true
-    add_index :supplier_subscriptions, :next_retry_at, where: "next_retry_at IS NOT NULL AND closed_at IS NULL", name: "index_supplier_subscriptions_retry"
+    add_index :supplier_subscriptions, %i[next_retry_at id], where: "next_retry_at IS NOT NULL AND closed_at IS NULL", name: "index_supplier_subscriptions_retry"
     add_foreign_key :supplier_subscriptions, :suppliers, on_delete: :restrict
-    add_foreign_key :supplier_subscriptions, :supplier_products, column: %i[supplier_product_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, name: "fk_supplier_subscriptions_product_supplier"
+    add_foreign_key :supplier_subscriptions, :supplier_products, column: %i[supplier_product_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, name: "fk_supplier_subscriptions_product_supplier"
     add_check_constraint :supplier_subscriptions, "num_nonnulls(external_ref_ciphertext,external_ref_digest,digest_key_version) IN (0,3)", name: "supplier_subscriptions_external_ref_pair_check"
     add_check_constraint :supplier_subscriptions, "external_ref_digest IS NULL OR octet_length(external_ref_digest) = 32", name: "supplier_subscriptions_digest_check"
     add_check_constraint :supplier_subscriptions, "digest_key_version IS NULL OR digest_key_version > 0", name: "supplier_subscriptions_digest_version_check"
@@ -345,7 +342,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
       BEGIN
         IF TG_OP = 'DELETE' THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_delete_denied'; END IF;
         IF TG_OP = 'INSERT' THEN
-          IF NEW.purged_at IS NOT NULL THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_cannot_start_purged'; END IF;
+          IF NEW.purged_at IS NOT NULL THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purged_at_managed'; END IF;
           RETURN NEW;
         END IF;
         IF (NEW.id,NEW.supplier_id,NEW.resource_kind,NEW.external_resource_id,NEW.provider_request_id,NEW.endpoint_key,
@@ -356,16 +353,17 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
             OLD.encryption_context)
         THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_immutable'; END IF;
         IF NEW.purge_after > OLD.purge_after THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_deadline_extension_denied'; END IF;
+        IF NEW.purged_at IS DISTINCT FROM OLD.purged_at
+        THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purged_at_managed'; END IF;
         IF OLD.purged_at IS NOT NULL AND (NEW.purged_at IS DISTINCT FROM OLD.purged_at OR NEW.payload_ciphertext IS NOT NULL OR NEW.payload_json IS NOT NULL)
         THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_restore_denied'; END IF;
-        IF OLD.payload_json IS DISTINCT FROM NEW.payload_json THEN
-          IF NOT (NEW.payload_json IS NULL AND NEW.purged_at IS NOT NULL) THEN
-            RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_json_replacement_denied';
-          END IF;
+        IF OLD.purged_at IS NULL AND NEW.payload_ciphertext IS NULL AND NEW.payload_json IS NULL THEN
+          IF pg_catalog.statement_timestamp() < NEW.purge_after
+          THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purge_too_early'; END IF;
+          NEW.purged_at := pg_catalog.statement_timestamp();
+        ELSIF OLD.payload_json IS DISTINCT FROM NEW.payload_json THEN
+          RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_json_replacement_denied';
         END IF;
-        IF NEW.purged_at IS NOT NULL AND OLD.purged_at IS NULL AND
-           (CURRENT_TIMESTAMP < NEW.purge_after OR NEW.purged_at > CURRENT_TIMESTAMP)
-        THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purge_too_early'; END IF;
         RETURN NEW;
       END $$;
 
@@ -390,7 +388,7 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
              (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_object_keys(NEW.allowed_values_schema))<>1 OR
              pg_catalog.jsonb_typeof(NEW.allowed_values_schema->'enum')<>'array' OR pg_catalog.jsonb_array_length(NEW.allowed_values_schema->'enum')=0
           THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_enum_invalid'; END IF;
-          IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements(NEW.allowed_values_schema->'enum') e WHERE pg_catalog.jsonb_typeof(e)<>'string' OR nullif(pg_catalog.btrim(e#>>'{}'),'') IS NULL) OR
+          IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements(NEW.allowed_values_schema->'enum') e WHERE pg_catalog.jsonb_typeof(e)<>'string' OR pg_catalog.octet_length(e#>>'{}') > 1024) OR
              (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_values_schema->'enum')) <>
              (SELECT pg_catalog.count(DISTINCT x) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_values_schema->'enum') x)
           THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_enum_invalid'; END IF;
@@ -493,8 +491,8 @@ class CreateCatalogEvidenceAndSyncTables < ActiveRecord::Migration[8.1]
   end
 
   def add_latest_observation_constraints
-    add_foreign_key :supplier_products, :supplier_observations, column: %i[latest_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, validate: false, name: "fk_supplier_products_latest_observation"
-    add_foreign_key :supplier_variants, :supplier_observations, column: %i[latest_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, validate: false, name: "fk_supplier_variants_latest_observation"
+    add_foreign_key :supplier_products, :supplier_observations, column: %i[latest_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, validate: false, name: "fk_supplier_products_latest_observation"
+    add_foreign_key :supplier_variants, :supplier_observations, column: %i[latest_observation_id supplier_id], primary_key: %i[id supplier_id], on_delete: :restrict, on_update: :restrict, deferrable: false, validate: false, name: "fk_supplier_variants_latest_observation"
     execute <<~SQL
       DO $$ BEGIN
         IF EXISTS (
