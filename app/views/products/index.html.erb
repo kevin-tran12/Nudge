@@ -1,0 +1,31 @@
+<% content_for :title, "Sample catalog | Nudge" %>
+
+<section class="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+  <div class="max-w-3xl">
+    <%= render "shared/badge", label: "Fixture preview", tone: :warning %>
+    <h1 class="mt-5 font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">Browse the sample catalog</h1>
+    <p class="mt-4 text-lg leading-8 text-muted">Explore the current product presentation before live catalog data is enabled.</p>
+  </div>
+
+  <div data-catalog-disclosure class="mt-8">
+    <%= render "shared/notice", title: "Sample catalog", message: "Products, prices, and availability are illustrative fixture data. They are not live supplier offers.", tone: :warning %>
+  </div>
+
+  <% if @page.items.any? %>
+    <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <%= render partial: "shared/catalog/product_card", collection: @page.items, as: :product %>
+    </div>
+  <% else %>
+    <section class="mt-8 rounded-card border border-line bg-surface p-6 shadow-card sm:p-8">
+      <h2 class="font-display text-2xl font-bold text-ink">No sample products on this page</h2>
+      <p class="mt-2 text-muted">Return to the beginning of the sample catalog.</p>
+      <div class="mt-5"><%= render "shared/button", label: "Back to first page", href: products_path, variant: :secondary %></div>
+    </section>
+  <% end %>
+
+  <% if @page.next_cursor %>
+    <nav aria-label="Catalog pagination" class="mt-8 flex justify-end">
+      <%= render "shared/button", label: "Next sample page", href: products_path(cursor: @page.next_cursor), variant: :secondary %>
+    </nav>
+  <% end %>
+</section>
