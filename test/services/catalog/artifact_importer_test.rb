@@ -637,7 +637,13 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     end
 
     def fixture_bytes(operation)
-      Rails.root.join("test/fixtures/files/cj/v1/#{operation}.json").binread
+      fixture = JSON.parse(Rails.root.join("test/fixtures/files/cj/v1/#{operation}.json").binread)
+      return JSON.generate(fixture) unless fixture.key?("entries")
+
+      entry = fixture.fetch("entries").first
+      JSON.generate("fixture_version" => Integrations::Cj::RecordArtifactValidator::FIXTURE_VERSION,
+        "observed_at" => fixture.fetch("observed_at"), "request" => entry.fetch("request"),
+        "response" => entry.fetch("response"))
     end
 
     def fixture_json(operation)
