@@ -14,11 +14,16 @@ module Identity
       raise ArgumentError, "unknown identity error code" unless CODES.include?(code)
 
       @code = code
-      super("Identity: #{code}")
+      @safe_message = "Identity: #{code}"
+      super(@safe_message)
     end
 
     def inspect
       "#<#{self.class.name} code=#{code.inspect}>"
+    end
+
+    def to_s
+      @safe_message
     end
 
     def as_json(*)

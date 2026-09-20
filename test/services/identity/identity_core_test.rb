@@ -2,6 +2,8 @@ require "test_helper"
 require "base64"
 require "digest"
 require "json"
+require "logger"
+require "stringio"
 require "yaml"
 
 class IdentityCoreTest < ActiveSupport::TestCase
@@ -141,6 +143,145 @@ class IdentityCoreTest < ActiveSupport::TestCase
     assert_equal consent.id, grant.disclosure_consent_record_id
     assert_equal verification.id, grant.turnstile_verification_id
     assert_result_redacted(result, result.bearer_token)
+  end
+
+  test "identity results redact direct nested interpolation and logging while preserving deliberate token access" do
+    user = create_user
+    session = create_shopping_session(user:)
+    consent = create_consent(session:)
+    verification = create_verification(session:)
+    issued = issue(issuer_at(REFERENCE_TIME, token: "string-log-sentinel-bearer-token-value"),
+      session, consent.policy_version, verification)
+    context = Identity::CurrentContext.new(clock: -> { REFERENCE_TIME }).call(shopping_session: session)
+    recorded = Identity::ConsentRecorder.new(clock: -> { REFERENCE_TIME }).call(
+      shopping_session: session,
+      policy_version: "disclosure-v2",
+      decision: "accepted",
+      scope_json: { "private" => "scope-log-sentinel" },
+      scope_schema_version: 1
+    )
+    authorization = authorizer_at.call(shopping_session: session, bearer_token: issued.bearer_token)
+    output = StringIO.new
+    logger = Logger.new(output)
+
+    sentinels = [ issued.bearer_token, issued.grant.public_id, session.public_id,
+      user.public_id, "scope-log-sentinel" ]
+    [ issued, context, recorded, authorization ].each do |result|
+      forms = [ result.to_s, "result=#{result}", "nested=#{[ { result: } ]}" ]
+      logger.info(result)
+      forms.each do |form|
+        sentinels.each { |sentinel| refute_includes form, sentinel }
+      end
+    end
+
+    sentinels.each { |sentinel| refute_includes output.string, sentinel }
+    assert_equal "string-log-sentinel-bearer-token-value", issued.bearer_token
+  end
+
+  test "issuer captures one instant for session consent verification and grant timestamps" do
+    session = create_shopping_session(
+      started_at: REFERENCE_TIME,
+      expires_at: REFERENCE_TIME + 1.second
+    )
+    consent = create_consent(session:, recorded_at: REFERENCE_TIME)
+    verification = create_verification(session:, challenge_timestamp: REFERENCE_TIME,
+      validated_at: REFERENCE_TIME, expires_at: REFERENCE_TIME + 1.second)
+    clock = sequential_clock(REFERENCE_TIME, REFERENCE_TIME + 2.seconds)
+
+    result = Identity::AiGrantIssuer.new(clock:, token_generator: -> { "single-clock-token-with-enough-entropy" }).call(
+      shopping_session: session,
+      disclosure_policy_version: consent.policy_version,
+      turnstile_verification: verification,
+      expected_action: "ai_grant",
+      expected_hostname: "shop.example.test"
+    )
+
+    assert_equal REFERENCE_TIME, result.grant.issued_at
+    assert_equal REFERENCE_TIME + 60.minutes, result.grant.expires_at
+    assert_equal 1, clock.calls
+  end
+
+  test "consent and authorization use one locked instant at expiry boundaries without partial writes" do
+    session = create_shopping_session(started_at: REFERENCE_TIME - 1.minute,
+      expires_at: REFERENCE_TIME + 1.second)
+    consent_clock = sequential_clock(REFERENCE_TIME + 1.second, REFERENCE_TIME)
+
+    assert_identity_error(:session_expired) do
+      Identity::ConsentRecorder.new(clock: consent_clock).call(
+        shopping_session: session,
+        policy_version: "disclosure-v1",
+        decision: "accepted",
+        scope_json: {},
+        scope_schema_version: 1
+      )
+    end
+    assert_equal 1, consent_clock.calls
+    assert_equal 0, ConsentRecord.count
+
+    session.update!(expires_at: REFERENCE_TIME + 2.hours)
+    consent = create_consent(session:)
+    verification = create_verification(session:)
+    issued = issue(issuer_at, session, consent.policy_version, verification)
+    authorization_clock = sequential_clock(issued.grant.expires_at, REFERENCE_TIME)
+
+    assert_identity_error(:grant_inactive) do
+      Identity::AiGrantAuthorizer.new(clock: authorization_clock).call(
+        shopping_session: session, bearer_token: issued.bearer_token
+      )
+    end
+    assert_equal 1, authorization_clock.calls
+    assert_equal "expired", issued.grant.reload.status
+  end
+
+  test "future session starts and future consent records fail closed without grants" do
+    future_session = create_shopping_session(started_at: REFERENCE_TIME + 1.second)
+    assert_identity_error(:session_inactive) do
+      Identity::CurrentContext.new(clock: -> { REFERENCE_TIME }).call(shopping_session: future_session)
+    end
+
+    session = create_shopping_session
+    consent = create_consent(session:, recorded_at: REFERENCE_TIME + 1.second)
+    verification = create_verification(session:)
+    assert_identity_error(:consent_required) do
+      issue(issuer_at, session, consent.policy_version, verification)
+    end
+    assert_equal 0, AiAccessGrant.count
+    assert_nil consent.reload.withdrawn_at
+  end
+
+  test "consent scope rejects cyclic deep oversized wide and unsupported JSON without changing history" do
+    session = create_shopping_session
+    current = create_consent(session:)
+    recorder = Identity::ConsentRecorder.new(clock: -> { REFERENCE_TIME })
+    cyclic = {}
+    cyclic["self"] = cyclic
+    deep = {}
+    cursor = deep
+    10.times { cursor["next"] = {}; cursor = cursor["next"] }
+    invalid_scopes = [
+      cyclic,
+      deep,
+      { "large" => "x" * 9_000 },
+      { "wide" => Array.new(65, true) },
+      { "duplicate" => { "key" => true, key: false } },
+      { "unsupported" => Time.now },
+      { "non_finite" => Float::INFINITY }
+    ]
+
+    invalid_scopes.each do |scope|
+      assert_identity_error(:invalid_input) do
+        recorder.call(
+          shopping_session: session,
+          policy_version: current.policy_version,
+          decision: "rejected",
+          scope_json: scope,
+          scope_schema_version: 1
+        )
+      end
+    end
+
+    assert_equal 1, ConsentRecord.count
+    assert_nil current.reload.withdrawn_at
   end
 
   test "issuer rejects invalid session consent and Turnstile evidence with stable sanitized errors" do
@@ -379,7 +520,7 @@ class IdentityCoreTest < ActiveSupport::TestCase
     end
 
     def assert_result_redacted(result, token)
-      forms = [ result.inspect, result.as_json.to_json, result.to_json,
+      forms = [ result.inspect, result.to_s, "#{result}", result.as_json.to_json, result.to_json,
         JSON.generate(result), ActiveSupport::JSON.encode(value: [ result ]) ]
       forms.each { |serialized| refute_includes serialized, token }
 
@@ -388,5 +529,22 @@ class IdentityCoreTest < ActiveSupport::TestCase
         error = assert_raises(TypeError, &serialize)
         refute_includes error.full_message, token
       end
+    end
+
+    def sequential_clock(*times)
+      Class.new do
+        attr_reader :calls
+
+        define_method(:initialize) do |values|
+          @values = values
+          @calls = 0
+        end
+
+        define_method(:call) do
+          value = @values.fetch(@calls)
+          @calls += 1
+          value
+        end
+      end.new(times)
     end
 end

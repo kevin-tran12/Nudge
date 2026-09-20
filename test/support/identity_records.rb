@@ -16,17 +16,19 @@ module TestSupport
       User.create!(status:)
     end
 
-    def create_shopping_session(user: nil, status: "active", expires_at: REFERENCE_TIME + 2.hours)
+    def create_shopping_session(user: nil, status: "active", started_at: REFERENCE_TIME - 1.hour,
+      expires_at: REFERENCE_TIME + 2.hours)
       ShoppingSession.create!(
         user:,
         status:,
-        started_at: REFERENCE_TIME - 1.hour,
+        started_at:,
         last_activity_at: REFERENCE_TIME - 1.minute,
         expires_at:
       )
     end
 
-    def create_consent(session:, policy_version: "disclosure-v1", decision: "accepted", withdrawn_at: nil)
+    def create_consent(session:, policy_version: "disclosure-v1", decision: "accepted", withdrawn_at: nil,
+      recorded_at: REFERENCE_TIME - 2.minutes)
       ConsentRecord.create!(
         shopping_session: session,
         user: session.user,
@@ -35,7 +37,7 @@ module TestSupport
         decision:,
         scope_json: { "provider" => "elevenlabs" },
         scope_schema_version: 1,
-        recorded_at: REFERENCE_TIME - 2.minutes,
+        recorded_at:,
         withdrawn_at:,
         correlation_id: SecureRandom.uuid
       )

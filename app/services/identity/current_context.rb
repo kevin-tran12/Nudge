@@ -20,13 +20,14 @@ module Identity
       @clock = clock
     end
 
-    def call(shopping_session:)
+    def call(shopping_session:, now: nil)
       fail!(:invalid_input) unless shopping_session.is_a?(ShoppingSession)
 
       session = shopping_session.reload
-      now = @clock.call
+      now ||= @clock.call
       fail!(:invalid_input) unless now.respond_to?(:<)
       fail!(:session_inactive) unless session.status == "active"
+      fail!(:session_inactive) unless session.started_at <= now
       fail!(:session_expired) unless now < session.expires_at
       fail!(:user_inactive) if session.user && session.user.status != "active"
 

@@ -9,5 +9,9 @@ module Identity
     def marshal_dump
       raise TypeError, SERIALIZATION_ERROR
     end
+
+    def to_s
+      inspect
+    end
   end
 end

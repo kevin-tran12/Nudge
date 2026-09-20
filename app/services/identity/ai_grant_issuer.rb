@@ -35,10 +35,10 @@ module Identity
         expected_action, expected_hostname)
 
       shopping_session.with_lock do
-        context = CurrentContext.new(clock: @clock).call(shopping_session:)
-        session = context.current_shopping_session
         now = @clock.call
-        consent = current_consent(session, disclosure_policy_version)
+        context = CurrentContext.new.call(shopping_session:, now:)
+        session = context.current_shopping_session
+        consent = current_consent(session, disclosure_policy_version, now)
         fail!(:consent_required) unless consent
 
         verification = turnstile_verification.reload
@@ -82,11 +82,12 @@ module Identity
         end
       end
 
-      def current_consent(session, policy_version)
+      def current_consent(session, policy_version, now)
         session.consent_records.current.find_by(
           consent_kind: "ai_provider_disclosure",
           policy_version:,
-          decision: "accepted"
+          decision: "accepted",
+          recorded_at: ..now
         )
       end
 

@@ -27,8 +27,8 @@ module Identity
     def call(shopping_session:, bearer_token:)
       validate_input!(shopping_session, bearer_token)
       outcome = shopping_session.with_lock do
-        context = CurrentContext.new(clock: @clock).call(shopping_session:)
         now = @clock.call
+        context = CurrentContext.new.call(shopping_session:, now:)
         grant = context.current_shopping_session.ai_access_grants.find_by(
           grant_token_digest: Digest::SHA256.digest(bearer_token)
         )

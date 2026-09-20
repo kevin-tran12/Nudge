@@ -22,6 +22,7 @@ class IdentityModelsTest < ActiveSupport::TestCase
     assert_equal session, verification.shopping_session
     assert_equal session, grant.shopping_session
     assert session.active_at?(REFERENCE_TIME)
+    refute session.active_at?(session.started_at - 1.second)
     refute session.active_at?(session.expires_at)
     assert grant.active_at?(REFERENCE_TIME + 59.minutes)
     refute grant.active_at?(grant.expires_at)

@@ -9,6 +9,6 @@ class ShoppingSession < ApplicationRecord
   validates :status, inclusion: { in: STATUSES }
 
   def active_at?(time)
-    status == "active" && time < expires_at
+    status == "active" && started_at <= time && time < expires_at
   end
 end
