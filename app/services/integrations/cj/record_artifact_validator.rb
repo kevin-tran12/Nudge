@@ -20,7 +20,10 @@ module Integrations
         email phone recipientname customername address address1 address2 zip
         zipcode postalcode token credential secret password
       ].freeze
-      RESPONSE_KEYS = %w[code data message requestId result].freeze
+      # Captured from live responses on 2026-09-20: every CJ reply also carries
+      # pointsInfo (the quota accounting for the call) and success alongside the
+      # documented envelope.
+      RESPONSE_KEYS = %w[code data message pointsInfo requestId result success].freeze
       # PRODUCT_KEYS, VARIANT_KEYS, PRODUCT_LIST_KEYS, PRODUCT_LIST_ITEM_KEYS and
       # INVENTORY_KEYS are the complete field sets captured from live
       # authenticated CJ responses on 2026-09-20 (product/query,
@@ -62,7 +65,10 @@ module Integrations
         clearanceOperationFee logisticAging logisticName logisticPrice taxesFee totalPostageFee
       ].freeze
       ACTIVE_ELEMENTS = "script, style, template, iframe, object".freeze
-      MAX_ABSOLUTE_NUMBER = BigDecimal("9999999999").freeze
+      # Bounded at the largest integer a JSON double round-trips exactly
+      # (2**53 - 1). The previous ceiling of 1e10 rejected every real CJ
+      # response, whose createTime is a millisecond epoch around 1.79e12.
+      MAX_ABSOLUTE_NUMBER = BigDecimal("9007199254740991").freeze
       MIN_DECIMAL_EXPONENT = -24
       MAX_LIST_PAGE_SIZE = 200
       MAX_FILTER_BYTES = 100
