@@ -18,6 +18,13 @@ module Catalog
   # therefore the whole run, and pagination is driven here one page per adapter
   # call, never inside the adapter. Nothing loops unbounded.
   #
+  # Failure is per product where it can be: a product whose response the
+  # validator refuses, or whose artifact the importer refuses, is recorded in
+  # the summary by id and error code and skipped, so one bad product cannot
+  # destroy an otherwise good page. A refusal that is not product-specific --
+  # credentials, quota, rate, transport -- still propagates and stops the run,
+  # and so does a burst of MAX_CONSECUTIVE_PRODUCT_FAILURES failures in a row.
+  #
   # Idempotency is the importer's: re-running an identical capture matches the
   # artifact-sha256 scope key of the earlier successful SyncRun and replays as a
   # no-op. This class adds no replay logic of its own; it only counts a replay
@@ -28,6 +35,22 @@ module Catalog
     DEFAULT_PAGE_SIZE = 20
     DEFAULT_MAX_VARIANTS_PER_PRODUCT = 25
     POINTS = Integrations::Cj::Adapter::POINTS
+
+    # One bad product must not destroy an otherwise good import, but a run in
+    # which almost everything fails is a broken run: it should stop rather than
+    # grind through a whole page burning points. Three consecutive product
+    # failures is the bound -- small enough that a systematically wrong response
+    # shape stops after three products, large enough that a couple of genuinely
+    # odd neighbours in one page do not abort a healthy import.
+    MAX_CONSECUTIVE_PRODUCT_FAILURES = 3
+
+    # Failures that are not specific to one product. Credentials, quota, rate
+    # refusal and transport failure would fail identically for every remaining
+    # product, so continuing would only burn quota: they abort the run.
+    FATAL_PROVIDER_CODES = %i[authentication_failed quota_exhausted throttled unavailable
+      unsupported_mode invalid_input fixture_miss].freeze
+    FATAL_IMPORT_CODES = %i[invalid_input invalid_operation supplier_mismatch persistence_failed
+      unsafe_sql_logger].freeze
 
     class Error < StandardError
       attr_reader :code
@@ -72,19 +95,42 @@ module Catalog
       end
     end
 
+    # One skipped product, surfaced by id and error code so a partially
+    # successful run is never mistaken for a clean one.
+    Failure = Data.define(:product_id, :code) do
+      def as_json(*)
+        { "product_id" => product_id, "code" => code.to_s }
+      end
+
+      def to_s
+        "#{product_id}:#{code}"
+      end
+    end
+
     Summary = Data.define(:products_discovered, :products_captured, :products_imported, :products_skipped,
-      :variants_captured, :variants_imported, :variants_skipped, :points_consumed, :calls, :dry_run) do
+      :products_failed, :failures, :variants_captured, :variants_imported, :variants_skipped,
+      :points_consumed, :calls, :dry_run) do
       def dry_run?
         dry_run
       end
 
       def as_json(*)
-        to_h.transform_keys(&:to_s).merge("calls" => calls.transform_keys(&:to_s))
+        to_h.transform_keys(&:to_s).merge("calls" => calls.transform_keys(&:to_s),
+          "failures" => failures.map(&:as_json))
       end
 
       def to_s
-        as_json.map { |key, value| "#{key}=#{value.is_a?(Hash) ? value.inspect : value}" }.join(" ")
+        as_json.map { |key, value| "#{key}=#{render(value)}" }.join(" ")
       end
+
+      private
+        def render(value)
+          case value
+          when Hash then value.inspect
+          when Array then value.map { |entry| entry.values.join(":") }.join(",")
+          else value
+          end
+        end
     end
 
     # Convenience constructor for trusted server-side callers (the catalog:sync
@@ -118,18 +164,18 @@ module Catalog
       raise Error.new(:unsupported_mode) unless @adapter.mode == :record
 
       @calls = { product_list: 0, product: 0, inventory: 0 }
+      @consecutive_failures = 0
       counts = Hash.new(0)
+      failures = []
 
       product_ids = discover(max_products:, page_size:, category:, keyword:)
       product_ids.each do |product_id|
-        variant_ids = capture_product(product_id, counts, dry_run:, limit: max_variants_per_product)
-        next if dry_run
-
-        variant_ids.each { |variant_id| capture_inventory(variant_id, counts) }
+        capture_one_product(product_id, counts, failures, dry_run:, limit: max_variants_per_product)
       end
 
       Summary.new(products_discovered: product_ids.size, products_captured: counts[:products_captured],
         products_imported: counts[:products_imported], products_skipped: counts[:products_skipped],
+        products_failed: failures.size, failures: failures.freeze,
         variants_captured: counts[:variants_captured], variants_imported: counts[:variants_imported],
         variants_skipped: counts[:variants_skipped], points_consumed: points_consumed,
         calls: @calls.freeze, dry_run:).freeze
@@ -159,6 +205,39 @@ module Catalog
         end
 
         ids.first(max_products)
+      end
+
+      # One product is one unit of work. A failure that belongs to this product
+      # alone -- a response shape the validator refuses, an artifact the
+      # importer refuses -- is recorded and skipped so the rest of the page
+      # still imports. The importer is transactional per artifact, so a product
+      # that fails here leaves nothing partial behind.
+      #
+      # Anything that is not product-specific aborts the run immediately, and a
+      # run whose products keep failing in a row stops at
+      # MAX_CONSECUTIVE_PRODUCT_FAILURES rather than working through the page.
+      def capture_one_product(product_id, counts, failures, dry_run:, limit:)
+        variant_ids = capture_product(product_id, counts, dry_run:, limit:)
+        variant_ids.each { |variant_id| capture_inventory(variant_id, counts) } unless dry_run
+        @consecutive_failures = 0
+        nil
+      rescue Integrations::Cj::Error, ArtifactImporter::Error => error
+        raise Error.new(error.code), cause: nil if fatal?(error)
+
+        # The adapter may have written a raw capture before the failure was
+        # raised; drop it so a later request can never consume a stale body.
+        @sink.discard(:product)
+        @sink.discard(:inventory)
+        failures << Failure.new(product_id: product_id.dup.freeze, code: error.code).freeze
+        @consecutive_failures += 1
+        raise Error.new(:too_many_product_failures) if @consecutive_failures >= MAX_CONSECUTIVE_PRODUCT_FAILURES
+
+        nil
+      end
+
+      def fatal?(error)
+        codes = error.is_a?(ArtifactImporter::Error) ? FATAL_IMPORT_CODES : FATAL_PROVIDER_CODES
+        codes.include?(error.code)
       end
 
       def capture_product(product_id, counts, dry_run:, limit:)
