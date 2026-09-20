@@ -20,6 +20,7 @@
 
     <%# Includes all stylesheet files in app/assets/stylesheets %>
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_include_tag "voice_launcher", nonce: true, defer: true %>
   </head>
 
   <body class="min-h-screen bg-canvas font-sans text-ink antialiased">
