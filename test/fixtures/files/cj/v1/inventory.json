@@ -1,0 +1,12 @@
+{
+  "fixture_version": 1,
+  "observed_at": "2026-09-20T00:00:00Z",
+  "request": { "variant_id": "00005678" },
+  "response": {
+    "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-1",
+    "data": [
+      { "vid": "00005678", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 9, "cjInventoryNum": 4, "factoryInventoryNum": 5, "stock": [{ "stockId": "{fixture-stock-1}", "inventory": 4, "factoryInventory": 5 }] },
+      { "vid": "00005678", "areaId": "02", "countryCode": "US", "totalInventoryNum": 0, "cjInventoryNum": 0, "factoryInventoryNum": null, "stock": null }
+    ]
+  }
+}
