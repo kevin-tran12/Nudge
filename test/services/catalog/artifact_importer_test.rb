@@ -111,13 +111,33 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_equal before, durable_snapshot
 
     other = Supplier.create!(key: "other", display_name: "Other", adapter_version: "1", api_version: "v1")
-    import_product(supplier: other)
+    other_product = Product.create!(title: "Other product", description: "", status: "draft")
+    other_variant = ProductVariant.create!(product: other_product, title: "Other variant",
+      option_summary: {}, option_schema_version: 1, status: "active")
+    other_product_ref = SupplierProduct.create!(supplier: other, product: other_product,
+      external_product_id: "00001234", status: "observed", first_seen_at: RECEIVED_AT,
+      last_seen_at: RECEIVED_AT, last_synced_at: RECEIVED_AT, adapter_version: "1")
+    SupplierVariant.create!(supplier: other, product_variant: other_variant,
+      supplier_product: other_product_ref, external_variant_id: "00005678", status: "observed",
+      first_seen_at: RECEIVED_AT, last_seen_at: RECEIVED_AT, last_synced_at: RECEIVED_AT)
     before = durable_snapshot
     error = assert_raises(Catalog::ArtifactImporter::Error) do
       @importer.call(supplier: @supplier, operation: :inventory,
         artifact_bytes: fixture_bytes(:inventory), received_at: RECEIVED_AT)
     end
     assert_equal :variant_not_imported, error.code
+    assert_equal before, durable_snapshot
+  end
+
+  test "rejects a persisted same-version supplier whose binding key is not cj without sequence allocation" do
+    wrong_supplier = Supplier.create!(key: "not-cj", display_name: "Wrong supplier",
+      adapter_version: "1", api_version: "v1")
+    before = durable_snapshot
+
+    assert_error(:supplier_mismatch) do
+      @importer.call(supplier: wrong_supplier, operation: :product,
+        artifact_bytes: fixture_bytes(:product), received_at: RECEIVED_AT)
+    end
     assert_equal before, durable_snapshot
   end
 
@@ -184,6 +204,19 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_equal before, durable_snapshot
   end
 
+  test "dry-run exact replay reports both replay and dry-run while changing no rows or sequences" do
+    first = import_product
+    before = durable_snapshot
+    replay = @importer.call(supplier: @supplier, operation: :product,
+      artifact_bytes: fixture_bytes(:product), received_at: RECEIVED_AT, dry_run: true)
+
+    assert replay.replayed?
+    assert replay.dry_run?
+    assert_equal first.sync_run_id, replay.sync_run_id
+    assert_equal first.counts, replay.counts
+    assert_equal before, durable_snapshot
+  end
+
   test "exact replay is a no-op before and after payload purge" do
     first = import_product
     before = durable_snapshot
@@ -224,6 +257,25 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_equal received, product_ref.last_seen_at
     assert_equal received, product_ref.last_synced_at
     assert_equal omitted_before, omitted.reload.attributes
+  end
+
+  test "newer product evidence counts every changed latest pointer in apply and dry run" do
+    import_product
+    newer = fixture_json(:product)
+    newer["observed_at"] = "2026-09-20T00:00:01Z"
+    newer["response"]["requestId"] = "new-pointer-only"
+    bytes = JSON.generate(newer)
+
+    before = durable_snapshot
+    predicted = @importer.call(supplier: @supplier, operation: :product,
+      artifact_bytes: bytes, received_at: RECEIVED_AT, dry_run: true)
+    assert_equal({ seen: 3, created: 0, updated: 3, errors: 0 }, predicted.counts)
+    assert_equal before, durable_snapshot
+
+    applied = @importer.call(supplier: @supplier, operation: :product,
+      artifact_bytes: bytes, received_at: RECEIVED_AT)
+    assert_equal predicted.counts, applied.counts
+    assert_equal 3, SupplierObservation.where(provider_request_id: "new-pointer-only").count
   end
 
   test "rejects future stale equal-time conflict and decreasing receipt time" do
@@ -313,6 +365,38 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_equal latest_run.seen_count, latest_run.sync_checkpoints.sole.state_json.fetch("subject_count")
   end
 
+  test "inventory freshness ignores newer pending failed and uncheckpointed stock evidence" do
+    import_product
+    create_manual_stock_observation!(observed_at: RECEIVED_AT + 10.seconds, status: "pending")
+    create_manual_stock_observation!(observed_at: RECEIVED_AT + 11.seconds, status: "failed")
+    unproven = create_manual_stock_observation!(observed_at: RECEIVED_AT + 12.seconds, status: "normalized")
+    create_uncheckpointed_success_for!(unproven)
+
+    result = @importer.call(supplier: @supplier, operation: :inventory,
+      artifact_bytes: fixture_bytes(:inventory), received_at: RECEIVED_AT + 20.seconds)
+
+    assert_equal({ seen: 3, created: 2, updated: 1, errors: 0 }, result.counts)
+    assert_equal 2, SyncRun.where(status: "succeeded", resource_kind: "inventory").count
+    assert_equal 1, SyncRun.find(result.sync_run_id).sync_checkpoints.count
+  end
+
+  test "inventory freshness rejects evidence proven by a succeeded run and applied checkpoint" do
+    import_product
+    newer = fixture_json(:inventory)
+    newer["observed_at"] = "2026-09-20T00:00:10Z"
+    newer["response"]["requestId"] = "newer-applied-stock"
+    @importer.call(supplier: @supplier, operation: :inventory,
+      artifact_bytes: JSON.generate(newer), received_at: RECEIVED_AT + 10.seconds)
+
+    stale = fixture_json(:inventory)
+    stale["observed_at"] = "2026-09-20T00:00:05Z"
+    stale["response"]["requestId"] = "stale-stock"
+    assert_error(:stale_artifact) do
+      @importer.call(supplier: @supplier, operation: :inventory,
+        artifact_bytes: JSON.generate(stale), received_at: RECEIVED_AT + 20.seconds)
+    end
+  end
+
   test "empty inventory still records explicit current unknown for the existing variant" do
     import_product
     empty = fixture_json(:inventory)
@@ -350,6 +434,36 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_equal "failed", failed.status
     assert_equal({ seen_count: 0, created_count: 0, updated_count: 0, error_count: 1 },
       failed.attributes.symbolize_keys.slice(:seen_count, :created_count, :updated_count, :error_count))
+  end
+
+  test "rescued importer failure inside a committed caller transaction cannot preserve partial writes" do
+    importer_class = Class.new(Catalog::ArtifactImporter) do
+      private
+        def create_observation!(...)
+          @observation_calls = @observation_calls.to_i + 1
+          raise ActiveRecord::StatementInvalid, "outer transaction failure" if @observation_calls == 2
+
+          super
+        end
+    end
+
+    ApplicationRecord.transaction do
+      assert_raises(Catalog::ArtifactImporter::Error) do
+        importer_class.new.call(supplier: @supplier, operation: :product,
+          artifact_bytes: fixture_bytes(:product), received_at: RECEIVED_AT)
+      end
+      Supplier.find(@supplier.id).touch
+    end
+
+    assert_equal 0, Product.count
+    assert_equal 0, ProductVariant.count
+    assert_equal 0, SupplierProduct.count
+    assert_equal 0, SupplierVariant.count
+    assert_equal 0, SupplierObservation.count
+    assert_equal 0, SyncCheckpoint.count
+    failed = SyncRun.sole
+    assert_equal "failed", failed.status
+    assert_equal "persistence_failed", failed.error_code
   end
 
   test "concurrent exact imports serialize to one success and one replay" do
@@ -419,17 +533,41 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
 
   test "artifact content is filtered from model inspection and SQL logs" do
     io = StringIO.new
-    prior_logger = ApplicationRecord.logger
-    ApplicationRecord.logger = ActiveSupport::Logger.new(io, level: Logger::DEBUG)
-    import_product
+    logger = ActiveSupport::Logger.new(io, level: Logger::DEBUG)
+    with_sql_logger(logger) { import_product }
 
     refute_includes io.string, "Stacking storage bin"
     refute_includes io.string, "fixture-product-1"
     observation = SupplierObservation.first
     refute_includes observation.inspect, "Stacking storage bin"
     assert_includes observation.inspect, "[FILTERED]"
-  ensure
-    ApplicationRecord.logger = prior_logger
+    assert_equal Logger::DEBUG, logger.level
+  end
+
+
+  test "unsupported debug logger fails closed before any row or sequence write" do
+    unsupported_logger = Object.new
+    unsupported_logger.define_singleton_method(:level) { Logger::DEBUG }
+    before = durable_snapshot
+
+    with_sql_logger(unsupported_logger) { assert_error(:unsafe_sql_logger) { import_product } }
+    assert_equal before, durable_snapshot
+  end
+
+  test "standard Ruby debug logger never receives artifact or provider request content" do
+    io = StringIO.new
+    logger = Logger.new(io, level: Logger::DEBUG)
+
+    with_sql_logger(logger) do
+      if logger.respond_to?(:silence)
+        import_product
+      else
+        assert_error(:unsafe_sql_logger) { import_product }
+      end
+    end
+    refute_includes io.string, "Stacking storage bin"
+    refute_includes io.string, "fixture-product-1"
+    assert_equal Logger::DEBUG, logger.level
   end
 
   private
@@ -484,6 +622,34 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
       connection.disable_referential_integrity do
         tables.each { |table| connection.execute("TRUNCATE TABLE #{table} RESTART IDENTITY CASCADE") }
       end
+    end
+
+    def create_manual_stock_observation!(observed_at:, status:)
+      SupplierObservation.create!(supplier: @supplier, resource_kind: "stock",
+        external_resource_id: "00005678", provider_request_id: "manual-#{status}",
+        endpoint_key: "product/stock/queryByVid", adapter_version: "1", payload_schema_version: 1,
+        payload_json: { "evidence" => status }, payload_sha256: Digest::SHA256.digest("manual-#{status}"),
+        observed_at:, received_at: observed_at, normalization_status: status,
+        normalization_error_code: ("manual_failure" if status == "failed"), purge_after: observed_at + 30.days)
+    end
+
+    def create_uncheckpointed_success_for!(observation)
+      hex = observation.payload_sha256.unpack1("H*")
+      SyncRun.create!(supplier: @supplier, mode: "fixture", resource_kind: "inventory",
+        scope_key: "catalog-import:v1:inventory:#{hex}",
+        scope_json: { "operation" => "inventory", "external_resource_id" => "00005678",
+          "artifact_sha256" => hex }, scope_schema_version: 1, adapter_version: "1", status: "succeeded",
+        points_consumed: 0, seen_count: 1, created_count: 0, updated_count: 1, error_count: 0,
+        started_at: observation.received_at, completed_at: observation.received_at)
+    end
+
+    def with_sql_logger(logger)
+      connection = ApplicationRecord.connection
+      prior_logger = connection.logger
+      connection.instance_variable_set(:@logger, logger)
+      yield
+    ensure
+      connection&.instance_variable_set(:@logger, prior_logger)
     end
 
     def concurrently(*artifacts)

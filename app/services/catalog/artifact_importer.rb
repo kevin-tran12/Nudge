@@ -69,11 +69,11 @@ module Catalog
       result = nil
 
       without_sql_payload_logging do
-        ApplicationRecord.transaction do
+        ApplicationRecord.transaction(requires_new: true) do
           supplier.lock!
           replay = successful_replay(context)
           if replay
-            result = result_for_run(replay, replayed: true)
+            result = result_for_run(replay, replayed: true, dry_run:)
             next
           end
 
@@ -114,6 +114,7 @@ module Catalog
           code = operation.instance_of?(Symbol) && !OPERATIONS.include?(operation) ? :invalid_operation : :invalid_input
           raise Error.new(code)
         end
+        raise Error.new(:supplier_mismatch) unless supplier.key == "cj"
       end
 
       def read_artifact(operation:, artifact_bytes:)
@@ -180,8 +181,7 @@ module Catalog
         end
 
         created = (supplier_product ? 0 : 1) + variant_plans.count { |entry| entry[:supplier_variant].nil? }
-        updated = (supplier_product && product_changed?(supplier_product, value, title, context) ? 1 : 0) +
-          variant_plans.count { |entry| entry[:supplier_variant] && variant_changed?(entry, context) }
+        updated = (supplier_product ? 1 : 0) + variant_plans.count { |entry| entry[:supplier_variant] }
         counts = count_hash(seen: 1 + variant_plans.size, created:, updated:)
         { value:, title:, supplier_product:, variants: variant_plans,
           observation_copies: 1 + variant_plans.size, counts: }
@@ -200,8 +200,7 @@ module Catalog
         end
 
         validate_reference_time!(supplier_variant, context)
-        latest_stock = SupplierObservation.where(supplier: context.supplier, resource_kind: "stock",
-          external_resource_id: context.external_resource_id).order(observed_at: :desc, id: :desc).first
+        latest_stock = latest_successful_stock_observation(context)
         validate_subject_time!(latest_stock, context)
 
         warehouses = rows.map do |row|
@@ -235,6 +234,40 @@ module Catalog
         end
       end
 
+      def latest_successful_stock_observation(context)
+        SyncRun.includes(:sync_checkpoints).where(supplier: context.supplier,
+          resource_kind: "inventory", status: "succeeded").filter_map do |run|
+          successfully_applied_stock_observation(context, run)
+        end.max_by { |observation| [ observation.observed_at, observation.id ] }
+      end
+
+      def successfully_applied_stock_observation(context, run)
+        scope = run.scope_json
+        return unless scope.keys.sort == %w[artifact_sha256 external_resource_id operation]
+        return unless scope["operation"] == "inventory" &&
+          scope["external_resource_id"] == context.external_resource_id
+
+        artifact_sha256 = scope["artifact_sha256"]
+        return unless artifact_sha256.is_a?(String) && artifact_sha256.match?(/\A[0-9a-f]{64}\z/) &&
+          run.scope_key == "catalog-import:v1:inventory:#{artifact_sha256}" &&
+          run.mode == "fixture" && run.points_consumed.zero? && run.error_count.zero?
+
+        checkpoints = run.sync_checkpoints.to_a
+        return unless checkpoints.one?
+        checkpoint = checkpoints.first
+        expected_state = scope.merge("subject_count" => run.seen_count, "status" => "applied")
+        return unless checkpoint.checkpoint_key == "artifact_applied" && checkpoint.cursor.nil? &&
+          checkpoint.page_number.nil? && checkpoint.state_schema_version == CHECKPOINT_VERSION &&
+          checkpoint.state_json == expected_state
+
+        SupplierObservation.where(supplier: context.supplier, resource_kind: "stock",
+          external_resource_id: context.external_resource_id,
+          payload_sha256: decoded_hash(artifact_sha256), normalization_status: "normalized",
+          received_at: run.started_at, endpoint_key: "product/stock/queryByVid",
+          adapter_version: run.adapter_version, payload_schema_version: 1).
+          order(observed_at: :desc, id: :desc).first
+      end
+
       def ensure_decimal_measurements!(variant)
         %i[weight length width height].each do |name|
           measurement = variant.public_send(name)
@@ -257,23 +290,6 @@ module Catalog
         if artifact_size * observation_copies > MAX_DUPLICATED_PAYLOAD_BYTES
           raise Error.new(:artifact_budget_exceeded)
         end
-      end
-
-      def product_changed?(reference, value, title, context)
-        product = reference.product
-        reference_timestamp_changed?(reference, context) || reference.external_sku != value.sku ||
-          reference.adapter_version != context.validated.provenance.adapter_version ||
-          product.title != title || product.description != (value.description || "")
-      end
-
-      def variant_changed?(entry, context)
-        reference = entry.fetch(:supplier_variant)
-        value = entry.fetch(:value)
-        variant = reference.product_variant
-        attributes = variant_attributes(value, entry.fetch(:title))
-        reference_timestamp_changed?(reference, context) || reference.external_variant_sku != value.sku ||
-          attributes.any? { |key, expected| variant.public_send(key) != expected } ||
-          supplier_measurement_attributes(value).any? { |key, expected| reference.public_send(key) != expected }
       end
 
       def warehouse_changed?(entry, context)
@@ -409,13 +425,15 @@ module Catalog
       end
 
       def failure_record_allowed?(error)
-        !%i[variant_not_imported supplier_mismatch invalid_input invalid_operation invalid_artifact].include?(error.code)
+        !%i[
+          variant_not_imported supplier_mismatch invalid_input invalid_operation invalid_artifact unsafe_sql_logger
+        ].include?(error.code)
       end
 
-      def result_for_run(run, replayed:)
+      def result_for_run(run, replayed:, dry_run: false)
         build_result(operation: run.resource_kind.to_sym, sync_run_id: run.id,
           counts: count_hash(seen: run.seen_count, created: run.created_count,
-            updated: run.updated_count, errors: run.error_count), replayed:)
+            updated: run.updated_count, errors: run.error_count), replayed:, dry_run:)
       end
 
       def build_result(operation:, counts:, sync_run_id: nil, replayed: false, dry_run: false)
@@ -447,8 +465,9 @@ module Catalog
       end
 
       def without_sql_payload_logging(&block)
-        logger = ApplicationRecord.logger
-        return yield unless logger&.respond_to?(:silence)
+        logger = ApplicationRecord.connection.logger
+        return yield unless logger
+        raise Error.new(:unsafe_sql_logger) unless logger.respond_to?(:silence)
 
         logger.silence(Logger::ERROR, &block)
       end
