@@ -14,6 +14,7 @@ Rails.application.config.after_initialize do
     api_key: ENV["ELEVENLABS_API_KEY"].presence,
     agent_id: ENV["ELEVENLABS_AGENT_ID"].presence,
     tool_secret: ENV["ELEVENLABS_TOOL_SECRET"].presence,
-    webhook_secret: ENV["ELEVENLABS_WEBHOOK_SECRET"].presence
+    webhook_secret: ENV["ELEVENLABS_WEBHOOK_SECRET"].presence,
+    mode: ENV.fetch("ELEVENLABS_MODE", "fixture")
   ).freeze
 end

@@ -71,7 +71,7 @@ module Agents
     MAX_HOSTNAME_BYTES = 255
 
     def initialize(clock: -> { Time.current }, verification_token_generator: -> { SecureRandom.hex(24) },
-      issuer: Identity::AiGrantIssuer.new, adapter: Integrations::ElevenLabs::Adapter.new, deployment: Rails.env)
+      issuer: Identity::AiGrantIssuer.new, adapter: Integrations::ElevenLabs::Adapter.build, deployment: Rails.env)
       @clock = clock
       @verification_token_generator = verification_token_generator
       @issuer = issuer

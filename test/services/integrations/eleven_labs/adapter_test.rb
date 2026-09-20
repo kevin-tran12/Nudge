@@ -111,7 +111,7 @@ class ElevenLabsAdapterTest < ActiveSupport::TestCase
   end
 
   def config_for(api_key: "sk_test_key", agent_id: "agent-123", tool_secret: "tool-secret", webhook_secret: "webhook-secret")
-    Integrations::ElevenLabs::Config.new(api_key:, agent_id:, tool_secret:, webhook_secret:)
+    Integrations::ElevenLabs::Config.new(api_key:, agent_id:, tool_secret:, webhook_secret:, mode: "fixture")
   end
 
   def assert_error(code, &block)

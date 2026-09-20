@@ -36,6 +36,19 @@ module Integrations
 
       attr_reader :mode
 
+      # The only place LIVE_CAPABILITY is handed to the policy. It reads the
+      # server-side configuration snapshot, never a request, so live transport
+      # cannot be selected by a caller or by untrusted input.
+      def self.build(config: Rails.application.config.x.eleven_labs, deployment: Rails.env, **options)
+        policy = if config.instance_of?(Config) && config.live?
+          ModePolicy.new(deployment: deployment, mode: :live, capability: ModePolicy::LIVE_CAPABILITY)
+        else
+          ModePolicy.new(deployment: deployment)
+        end
+
+        new(mode_policy: policy, config: config, **options)
+      end
+
       def initialize(mode_policy: ModePolicy.new(deployment: Rails.env), config: Rails.application.config.x.eleven_labs,
         clock: -> { Time.current }, http_client: nil)
         raise Error.new(:invalid_input), cause: nil unless mode_policy.instance_of?(ModePolicy)
