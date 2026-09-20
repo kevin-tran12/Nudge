@@ -1,0 +1,10 @@
+{
+  "messageId": "fixture-message-001",
+  "messageType": "PRODUCT",
+  "type": "UPDATE",
+  "params": {
+    "pid": "product-fixture-001",
+    "status": "ACTIVE",
+    "supplierText": "Untrusted supplier text remains data"
+  }
+}
