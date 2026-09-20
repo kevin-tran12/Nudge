@@ -23,14 +23,18 @@ services:
       context: .
       target: development
     init: true
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
     environment:
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: ${DB_USER:-nudge}
       DB_PASSWORD: ${DB_PASSWORD:-nudge_local_only}
-      RAILS_ENV: ${RAILS_ENV:-development}
+      RAILS_ENV: development
       RAILS_MAX_THREADS: 5
       PROVIDER_MODE: fixture
+      CJ_MODE: fixture
     depends_on:
       db:
         condition: service_healthy
@@ -44,8 +48,16 @@ services:
       - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
       - .:/rails
+      - rails_log:/rails/log
+      - rails_storage:/rails/storage
+      - rails_tmp:/rails/tmp
+      - rails_asset_builds:/rails/app/assets/builds
     stdin_open: true
     tty: true
 
 volumes:
   postgres_data:
+  rails_log:
+  rails_storage:
+  rails_tmp:
+  rails_asset_builds:

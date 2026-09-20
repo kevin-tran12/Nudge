@@ -5,15 +5,20 @@ require "fileutils"
 root = File.expand_path("..", __dir__)
 writable_paths = %w[log storage tmp app/assets/builds].map { |path| File.join(root, path) }
 
-if Process.uid.zero?
-  writable_paths.each do |path|
-    FileUtils.mkdir_p(path)
-    FileUtils.chown_R(1000, 1000, path)
-  end
+abort "Refusing to run the Rails process as root" if Process.uid.zero?
 
-  Process::GID.change_privilege(1000)
-  Process::UID.change_privilege(1000)
+if %w[development test].include?(ENV.fetch("RAILS_ENV", "development"))
+  provider_modes = {
+    "PROVIDER_MODE" => ENV.fetch("PROVIDER_MODE", "fixture"),
+    "CJ_MODE" => ENV.fetch("CJ_MODE", "fixture")
+  }
+  unsafe_modes = provider_modes.reject { |_name, mode| mode == "fixture" }
+
+  unless unsafe_modes.empty?
+    abort "Local development and tests require fixture provider modes: #{unsafe_modes.keys.join(", ")}"
+  end
 end
 
+writable_paths.each { |path| FileUtils.mkdir_p(path) }
 FileUtils.rm_f(File.join(root, "tmp/pids/server.pid"))
 exec(*ARGV)

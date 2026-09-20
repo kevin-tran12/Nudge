@@ -5,13 +5,14 @@ class HealthChecksTest < ActionDispatch::IntegrationTest
     get "/up"
 
     assert_response :success
+    assert_equal({ "status" => "ok" }, response.parsed_body)
   end
 
   test "readiness confirms the database is reachable" do
     get "/health/ready"
 
     assert_response :success
-    assert_equal({ "status" => "ok", "database" => "ok" }, response.parsed_body)
+    assert_equal({ "status" => "ok" }, response.parsed_body)
   end
 
   test "readiness fails closed without exposing database details" do
@@ -25,7 +26,7 @@ class HealthChecksTest < ActionDispatch::IntegrationTest
 
     assert_response :service_unavailable
     assert_equal(
-      { "status" => "unavailable", "database" => "unavailable" },
+      { "status" => "unavailable" },
       response.parsed_body
     )
   ensure

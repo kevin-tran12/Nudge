@@ -7,18 +7,34 @@ Nudge is a Rails commerce application built as a modular monolith. Docker Compos
 ```bash
 docker compose build app
 docker compose run --rm app bin/setup --skip-server
-docker compose up app
+docker compose up --wait app
 ```
 
-Open <http://localhost:3000/up> to verify that Rails is healthy.
+Open <http://localhost:3000/up> for liveness. Readiness, including the database connection, is available at <http://localhost:3000/health/ready>. Both endpoints return only a fixed status and never include configuration or dependency details.
 
 ## Checks
 
 ```bash
-docker compose run --rm -e RAILS_ENV=test app bin/rails db:prepare test
+docker compose run --rm -e RAILS_ENV=test app bin/rails db:prepare
+docker compose run --rm -e RAILS_ENV=test app bin/rails test
 docker compose run --rm app bin/rubocop
 docker compose run --rm app bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error
 docker compose run --rm app bin/bundler-audit
+```
+
+The development image and Compose service run as UID/GID `1000:1000`. Writable runtime directories use named volumes layered beneath the source bind mount, keeping source reloads portable across Docker Desktop and Linux without a root Rails process. Provider modes are fixed to fixtures for ordinary development and tests; the entrypoint refuses a non-fixture override.
+
+Inspect logs without entering the container:
+
+```bash
+docker compose logs app
+```
+
+Build and smoke-test the production-compatible runtime image:
+
+```bash
+docker build --target runtime --tag nudge:runtime .
+docker run --rm --env SECRET_KEY_BASE_DUMMY=1 nudge:runtime bin/rails runner "Rails.application.eager_load!"
 ```
 
 Normal teardown preserves the database:

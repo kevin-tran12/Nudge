@@ -12,6 +12,12 @@
 # Configure Using Gemfile
 # gem "pg"
 #
+<%
+development_database = ENV.fetch("DEVELOPMENT_DATABASE_NAME", "nudge_development")
+test_database = ENV.fetch("TEST_DATABASE_NAME", "nudge_test")
+raise "Development and test must use different databases" if development_database == test_database
+%>
+
 default: &default
   adapter: postgresql
   encoding: unicode
@@ -24,14 +30,14 @@ default: &default
 
 development:
   <<: *default
-  database: nudge_development
+  database: <%= development_database %>
 
 # Warning: The database defined as "test" will be erased and
 # re-generated from your development database when you run "rake".
 # Do not set this db to the same as development or production.
 test:
   <<: *default
-  database: nudge_test
+  database: <%= test_database %>
 
 # As with config/credentials.yml, you never want to store sensitive information,
 # like your database password, in your source code. If your source code is

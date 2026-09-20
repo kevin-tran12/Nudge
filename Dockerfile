@@ -14,7 +14,9 @@ RUN apt-get update -qq && \
     apt-get install --no-install-recommends -y libpq5 libvips && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --system --gid 1000 rails && \
-    useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash
+    useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash && \
+    mkdir -p log storage tmp app/assets/builds && \
+    chown -R rails:rails /home/rails log storage tmp app/assets/builds
 
 FROM base AS build
 
@@ -35,6 +37,10 @@ FROM build AS development
 
 ENV HOME=/home/rails \
     RAILS_ENV=development
+
+RUN chown -R rails:rails log storage tmp app/assets/builds
+
+USER 1000:1000
 
 ENTRYPOINT ["/rails/bin/docker-entrypoint"]
 CMD ["bin/rails", "server", "-b", "0.0.0.0"]
