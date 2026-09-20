@@ -1,9 +1,19 @@
 services:
+  db:
+    ports: !reset []
+    volumes:
+      - type: volume
+        source: system_test_postgres_data
+        target: /var/lib/postgresql
+
   system_app:
     build:
       context: .
       target: development
     init: true
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
     command: ["bin/system-test-server"]
     environment:
       DB_HOST: db
@@ -13,6 +23,7 @@ services:
       RAILS_ENV: test
       RAILS_MAX_THREADS: 5
       PROVIDER_MODE: fixture
+      CJ_MODE: fixture
     depends_on:
       db:
         condition: service_healthy
@@ -23,7 +34,22 @@ services:
       retries: 15
       start_period: 15s
     volumes:
-      - .:/rails
+      - type: bind
+        source: .
+        target: /rails
+        read_only: true
+      - type: volume
+        source: system_app_log
+        target: /rails/log
+      - type: volume
+        source: system_app_storage
+        target: /rails/storage
+      - type: volume
+        source: system_app_tmp
+        target: /rails/tmp
+      - type: volume
+        source: system_test_asset_builds
+        target: /rails/app/assets/builds
 
   browser:
     image: ghcr.io/seleniumhq/standalone-chromium:151.0.7922.108-chromedriver-151.0.7922.108-grid-4.47.0-20260808@sha256:1d3d834a2ce93f26cc0d0ae3c61abd189755b32649f5c356c6c5cf9502aa397e
@@ -47,17 +73,23 @@ services:
       context: .
       target: development
     init: true
-    command: ["bin/rails", "test:system"]
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    command: ["bin/test-browser"]
     environment:
       CAPYBARA_APP_HOST: http://system_app:3000
       DB_HOST: db
       DB_PORT: 5432
       DB_USER: ${DB_USER:-nudge}
       DB_PASSWORD: ${DB_PASSWORD:-nudge_local_only}
-      PARALLEL_WORKERS: 1
+      RAILS_TEST_WORKERS: 1
       PROVIDER_MODE: fixture
+      CJ_MODE: fixture
+      COVERAGE_ROOT: /coverage
       RAILS_ENV: test
       RAILS_SYSTEM_TESTING_SCREENSHOT: failed
+      RUN_BROWSER_TESTS: "1"
       SELENIUM_URL: http://browser:4444/wd/hub
     depends_on:
       browser:
@@ -67,4 +99,61 @@ services:
       system_app:
         condition: service_healthy
     volumes:
-      - .:/rails
+      - type: bind
+        source: .
+        target: /rails
+        read_only: true
+      - type: volume
+        source: system_tests_log
+        target: /rails/log
+      - type: volume
+        source: system_tests_storage
+        target: /rails/storage
+      - type: volume
+        source: system_tests_tmp
+        target: /rails/tmp
+      - type: volume
+        source: system_test_asset_builds
+        target: /rails/app/assets/builds
+      - type: volume
+        source: system_test_coverage
+        target: /coverage
+
+  artifact_export:
+    profiles: ["tools"]
+    build:
+      context: .
+      target: development
+    init: true
+    entrypoint: []
+    command: ["ruby", "bin/export-system-test-artifacts"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - type: bind
+        source: .
+        target: /rails
+        read_only: true
+      - type: volume
+        source: system_test_coverage
+        target: /source/coverage
+        read_only: true
+      - type: volume
+        source: system_tests_tmp
+        target: /source/tmp
+        read_only: true
+      - type: bind
+        source: ${SYSTEM_TEST_ARTIFACTS_PATH:-./tmp/system-test-artifacts}
+        target: /export
+
+volumes:
+  system_test_postgres_data:
+  system_app_log:
+  system_app_storage:
+  system_app_tmp:
+  system_tests_log:
+  system_tests_storage:
+  system_tests_tmp:
+  system_test_asset_builds:
+  system_test_coverage:

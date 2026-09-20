@@ -11,7 +11,7 @@ class ApplicationShellTest < ApplicationSystemTestCase
   test "application shell remains accessible at its supported viewports" do
     VIEWPORTS.each do |name, (width, height)|
       set_viewport(width, height)
-      visit root_path
+      visit "/"
 
       assert_equal width, page.evaluate_script("window.innerWidth"), "#{name} viewport width"
       assert_shell_landmarks(name)
@@ -22,7 +22,7 @@ class ApplicationShellTest < ApplicationSystemTestCase
 
   test "keyboard users can reveal and follow the skip link" do
     set_viewport(320, 720)
-    visit root_path
+    visit "/"
 
     send_key(:tab)
 

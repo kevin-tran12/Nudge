@@ -39,7 +39,7 @@ CI uses one Rails test worker for repeatable coverage and failure output. A deve
 
 ## Browser E2E status
 
-`bin/test-browser` is the reserved browser entry point. It currently exits with an error because no production-like browser environment or `test/system` journey is registered. Do not add it as a green CI check or claim browser coverage until a pinned browser/driver image and real journeys exist. Staging browser E2E remains a later release gate.
+`bin/test-browser` runs the current application-shell journey through the pinned remote Chromium service in `compose.system-test.yaml`. The lane covers 320, 375, 768, and 1280 CSS-pixel viewports, semantic landmarks, horizontal overflow, keyboard skip-link behavior, visible focus, and minimum target geometry. Run it with the deterministic command and artifact-export procedure in [`system-tests.md`](system-tests.md). Broader staging journeys remain a later release gate as product workflows are implemented.
 
 ## CI evidence and failure behavior
 
