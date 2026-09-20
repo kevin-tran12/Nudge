@@ -5,6 +5,8 @@ class ShoppingSession < ApplicationRecord
   has_many :consent_records, inverse_of: :shopping_session
   has_many :turnstile_verifications, inverse_of: :shopping_session
   has_many :ai_access_grants, inverse_of: :shopping_session
+  has_many :requirements, inverse_of: :shopping_session, dependent: nil
+  has_many :recommendation_runs, inverse_of: :shopping_session, dependent: nil
 
   validates :status, inclusion: { in: STATUSES }
 
