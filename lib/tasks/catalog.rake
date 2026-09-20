@@ -105,8 +105,16 @@ module CatalogSync
         %w[fixture record].freeze
       end
 
+      # The default bound is chosen to fit the record ceiling. Record's ceiling
+      # is 2,500 points, but product/inventory/product_list are all :catalog
+      # purpose, so the binding limit is the catalog partition: 60% of 2,500 =
+      # 1,500 points. Worst case for these defaults is
+      #   50 (1 product_list page) + 12 x 50 (product) + 12 x 5 x 10 (inventory)
+      #   = 50 + 600 + 600 = 1,250 points,
+      # leaving 250 points of headroom. Raising any of these three variables
+      # must be re-checked against that arithmetic.
       def defaults
-        { mode: "fixture", product_limit: "20", page_size: "20", max_variants: "5",
+        { mode: "fixture", product_limit: "12", page_size: "12", max_variants: "5",
           category: "", keyword: "", dry_run: "false" }.freeze
       end
 
