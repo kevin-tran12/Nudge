@@ -1,5 +1,6 @@
 ENV["RAILS_ENV"] ||= "test"
 ENV["PROVIDER_MODE"] ||= "fixture"
+ENV["ELEVENLABS_AGENT_ID"] ||= "demo-agent-fixture" # non-secret fixture default; ELEVENLABS-SPECIFIC
 
 abort "Tests require PROVIDER_MODE=fixture" unless ENV["PROVIDER_MODE"] == "fixture"
 

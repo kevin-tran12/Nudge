@@ -10,5 +10,9 @@ Rails.application.routes.draw do
 
   resources :products, only: %i[index show]
 
+  namespace :voice do
+    resource :session, only: :create, controller: "sessions"
+  end
+
   root "home#show"
 end
