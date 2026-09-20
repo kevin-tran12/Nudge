@@ -45,12 +45,14 @@ class FixtureProductReaderTest < ActiveSupport::TestCase
     assert_raises(FrozenError) { product.variants.first.price.currency.replace("EUR") }
 
     result = Integrations::Cj::Adapter.new.product(product_id: "00001234")
-    native_reference = result.with(value: result.value.with(sku: "BIN<SMALL>"))
+    native_reference = result.with(value: result.value.with(sku: ActiveSupport::SafeBuffer.new("BIN<SMALL>")))
     projected = Catalog::FixtureProductReader.new(
       adapter: StubAdapter.new(product_result: native_reference)
     ).detail(id: "00001234")
     assert_equal "BIN<SMALL>", projected.sku
+    assert_instance_of String, projected.sku
     refute projected.sku.html_safe?
+    assert_raises(FrozenError) { projected.sku.replace("changed") }
   end
 
   test "pagination inputs are bounded and ordering is stable" do
@@ -111,11 +113,40 @@ class FixtureProductReaderTest < ActiveSupport::TestCase
 
   test "unsafe media references are rejected at the catalog boundary" do
     product_result = Integrations::Cj::Adapter.new.product(product_id: "00001234")
-    unsafe_product = product_result.value.with(image_urls: [ "javascript:alert(1)" ])
-    unsafe_result = product_result.with(value: unsafe_product)
-    reader = Catalog::FixtureProductReader.new(adapter: StubAdapter.new(product_result: unsafe_result))
+    unsafe_urls = [
+      "javascript:alert(1)",
+      "https://localhost./a.jpg",
+      "https://127.1/a.jpg",
+      "https://127.0.0.1./a.jpg",
+      "https://0x7f.0.0.1/a.jpg",
+      "https://%31%32%37.0.0.1/a.jpg",
+      "https://cf.cjdropshipping.com./a.jpg",
+      "https://example.com/a.jpg"
+    ]
 
-    assert_catalog_error(:source_unavailable) { reader.detail(id: "00001234") }
+    unsafe_urls.each do |url|
+      unsafe_product = product_result.value.with(image_urls: [ url ])
+      unsafe_result = product_result.with(value: unsafe_product)
+      reader = Catalog::FixtureProductReader.new(adapter: StubAdapter.new(product_result: unsafe_result))
+
+      assert_catalog_error(:source_unavailable) { reader.detail(id: "00001234") }
+    end
+  end
+
+  test "invalid identifier and cursor encodings fail with stable input errors" do
+    reader = Catalog::FixtureProductReader.new
+    invalid_utf8 = "\xFF".dup.force_encoding(Encoding::UTF_8)
+    utf16_identifier = "00001234".encode(Encoding::UTF_16LE)
+    utf16_cursor = "1".encode(Encoding::UTF_16LE)
+
+    [ invalid_utf8, utf16_identifier ].each do |id|
+      error = assert_catalog_error(:invalid_input) { reader.detail(id: id) }
+      assert_nil error.cause
+    end
+    [ invalid_utf8, utf16_cursor ].each do |cursor|
+      error = assert_catalog_error(:invalid_input) { reader.list(cursor: cursor) }
+      assert_nil error.cause
+    end
   end
 
   test "catalog reads make no network calls or database queries" do

@@ -1,9 +1,12 @@
-require "ipaddr"
 require "uri"
 
 module Catalog
   class FixtureProductReader < ProductReader
     DEFAULT_PRODUCT_IDS = [ "00001234" ].freeze
+    APPROVED_MEDIA_HOSTS = %w[
+      cf.cjdropshipping.com
+      cc-west-usa.oss-us-west-1.aliyuncs.com
+    ].freeze
     ID_PATTERN = /\A[A-Za-z0-9_{}-]+\z/
     CURSOR_PATTERN = /\A(?:0|[1-9]\d{0,5})\z/
 
@@ -73,11 +76,11 @@ module Catalog
         return Price.new(state: :unknown, amount_minor: nil, currency: nil, freshness: freshness) if source.nil?
 
         unless source.amount_minor.is_a?(Integer) && source.amount_minor >= 0 &&
-            source.currency.is_a?(String) && source.currency.match?(/\A[A-Z]{3}\z/)
+            safe_string_encoding?(source.currency, min: 3, max: 3) && source.currency.match?(/\A[A-Z]{3}\z/)
           raise Error.new(:source_unavailable)
         end
         Price.new(state: :known, amount_minor: source.amount_minor,
-          currency: source.currency.dup, freshness: freshness)
+          currency: plain_string(source.currency), freshness: freshness)
       end
 
       def availability(variant_id)
@@ -107,10 +110,10 @@ module Catalog
       def measurement(source)
         return Measurement.new(state: :unknown, value: nil, unit: nil) if source.nil?
         unless source.value.is_a?(Numeric) && source.value >= 0 &&
-            source.unit.is_a?(String) && source.unit.bytesize.between?(1, 20)
+            safe_string_encoding?(source.unit, min: 1, max: 20)
           raise Error.new(:source_unavailable)
         end
-        Measurement.new(state: :known, value: source.value, unit: source.unit.dup)
+        Measurement.new(state: :known, value: source.value, unit: plain_string(source.unit))
       end
 
       def images(source)
@@ -122,33 +125,25 @@ module Catalog
       end
 
       def safe_media_url(value)
-        raise Error.new(:source_unavailable) unless value.is_a?(String) && value.bytesize.between?(1, 2048)
+        raise Error.new(:source_unavailable) unless safe_string_encoding?(value, min: 1, max: 2048)
         uri = URI.parse(value)
-        host = uri.host
         unless uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && uri.query.nil? &&
-            uri.fragment.nil? && host&.include?(".") && !literal_ip?(host) &&
+            uri.fragment.nil? && APPROVED_MEDIA_HOSTS.include?(uri.host) &&
             uri.path.start_with?("/") && !uri.path.split("/").include?("..") && !uri.path.include?("%")
           raise Error.new(:source_unavailable)
         end
-        value.dup
-      rescue URI::InvalidURIError
+        plain_string(value)
+      rescue URI::InvalidURIError, Encoding::CompatibilityError
         raise Error.new(:source_unavailable), cause: nil
       end
 
-      def literal_ip?(host)
-        IPAddr.new(host)
-        true
-      rescue IPAddr::InvalidAddressError
-        false
-      end
-
       def plain_text(value, limit)
-        unless value.is_a?(String) && value.valid_encoding? && value.bytesize.between?(1, limit)
+        unless safe_string_encoding?(value, min: 1, max: limit)
           raise Error.new(:source_unavailable)
         end
         sanitized = ActionView::Base.full_sanitizer.sanitize(value).to_s
         raise Error.new(:source_unavailable) if sanitized.empty? || sanitized.match?(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/)
-        sanitized
+        plain_string(sanitized)
       end
 
       def optional_plain_text(value, limit)
@@ -157,11 +152,11 @@ module Catalog
 
       def optional_reference(value)
         return if value.nil?
-        unless value.is_a?(String) && value.valid_encoding? && value.bytesize.between?(1, 200) &&
+        unless safe_string_encoding?(value, min: 1, max: 200) &&
             !value.match?(/[\u0000-\u001f\u007f]/)
           raise Error.new(:source_unavailable)
         end
-        value.dup
+        plain_string(value)
       end
 
       def observed_time(result)
@@ -171,10 +166,10 @@ module Catalog
       end
 
       def identifier(value)
-        unless value.is_a?(String) && value.valid_encoding? && value.bytesize.between?(1, 200) && value.match?(ID_PATTERN)
+        unless safe_string_encoding?(value, min: 1, max: 200) && value.match?(ID_PATTERN)
           raise Error.new(:invalid_input)
         end
-        value.dup
+        plain_string(value)
       end
 
       def validate_limit!(limit)
@@ -183,8 +178,20 @@ module Catalog
 
       def cursor_offset(cursor)
         return 0 if cursor.nil?
-        raise Error.new(:invalid_input) unless cursor.is_a?(String) && cursor.match?(CURSOR_PATTERN)
+        unless safe_string_encoding?(cursor, min: 1, max: 6) && cursor.match?(CURSOR_PATTERN)
+          raise Error.new(:invalid_input)
+        end
         cursor.to_i
+      end
+
+      def safe_string_encoding?(value, min:, max:)
+        value.is_a?(String) && [ Encoding::UTF_8, Encoding::US_ASCII ].include?(value.encoding) &&
+          value.valid_encoding? &&
+          value.bytesize.between?(min, max)
+      end
+
+      def plain_string(value)
+        String.new(value)
       end
   end
 end
