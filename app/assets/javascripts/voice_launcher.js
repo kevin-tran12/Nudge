@@ -39,19 +39,30 @@
     return meta ? meta.getAttribute("content") : null;
   }
 
-  function setSectionVisible(section, visible) {
-    if (!section) return;
-    section.toggleAttribute("hidden", !visible);
-    var controls = section.querySelectorAll("button, a[href], input, select, textarea");
+  // Disables/re-enables and un-tabs/tabs every control within a container,
+  // without touching the container's own visibility. Used both for the
+  // hidden-attribute sections below and for the native <dialog>, whose own
+  // open/closed state already controls its visibility -- a closed dialog's
+  // descendants must not be left focusable or counted as live interactive
+  // targets by controls disabled here.
+  function setControlsInteractive(container, interactive) {
+    if (!container) return;
+    var controls = container.querySelectorAll("button, a[href], input, select, textarea");
     for (var index = 0; index < controls.length; index += 1) {
       var control = controls[index];
-      if ("disabled" in control) control.disabled = !visible;
-      if (visible) {
+      if ("disabled" in control) control.disabled = !interactive;
+      if (interactive) {
         control.removeAttribute("tabindex");
       } else {
         control.setAttribute("tabindex", "-1");
       }
     }
+  }
+
+  function setSectionVisible(section, visible) {
+    if (!section) return;
+    section.toggleAttribute("hidden", !visible);
+    setControlsInteractive(section, visible);
   }
 
   function VoiceLauncher(root) {
@@ -137,6 +148,8 @@
     if (!dialog || typeof dialog.showModal !== "function") return;
 
     var shouldBeOpen = state === "disclosure_required";
+    setControlsInteractive(dialog, shouldBeOpen);
+
     if (shouldBeOpen) {
       if (!dialog.open) {
         this.disclosureTrigger = document.activeElement;

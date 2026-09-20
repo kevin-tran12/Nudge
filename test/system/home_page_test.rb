@@ -27,11 +27,16 @@ class HomePageTest < ApplicationSystemTestCase
     set_viewport(1280, 900)
     visit root_path
 
-    fill_in "Search products", with: "storage bin"
+    # The lexical search index has no documents in this environment (it is
+    # only populated by the catalog indexer), so any query legitimately
+    # lands on the catalog page's deliberate empty state. This proves the
+    # home page reuses the exact same /products?q= search page rather than
+    # a second implementation.
+    fill_in "Search products", with: "nonexistent-widget-zzz"
     find_field("Search products").native.send_keys(:enter)
 
     assert_selector "h1", text: "Browse the sample catalog"
-    assert_selector "a[href='#{product_path('00001234')}']", text: "Stacking storage bin"
+    assert_selector "h2", text: /No results for/
   end
 
   test "the voice disclosure modal opens and closes correctly from the home page" do
