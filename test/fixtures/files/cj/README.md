@@ -49,6 +49,12 @@ has the same `fixture_version`, `observed_at`, `request`, and `response` envelop
 used by these fixtures and can be replayed through the existing normalizer.
 Identical inputs produce identical bytes and hashes. The caller remains
 responsible for any later reviewed filesystem write and deduplication.
+Decimal JSON numbers are parsed without passing through binary floating point
+and are emitted as JSON numbers, preserving accepted measurement precision on
+replay. Every numeric value is bounded before provider diagnostics are removed.
+Implicit string/log rendering exposes metadata only, and YAML/Psych and Marshal
+serialization of the result are refused; callers must deliberately access
+`artifact_bytes` or `normalized`.
 
 This gate does not enable `verify`, `record`, or `live` transport. Before a
 transport is connected, current official evidence must establish the exact API

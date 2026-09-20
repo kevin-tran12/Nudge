@@ -3,6 +3,7 @@ require "digest"
 require "json"
 require "net/http"
 require "stringio"
+require "yaml"
 
 class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
   FIXTURES = Rails.root.join("test/fixtures/files/cj/v1")
@@ -28,7 +29,7 @@ class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
       assert first.artifact_sha256.frozen?
       assert first.normalized.frozen?
 
-      artifact = JSON.parse(first.artifact_bytes)
+      artifact = JSON.parse(first.artifact_bytes, decimal_class: BigDecimal)
       assert_equal %w[fixture_version observed_at request response], artifact.keys
       assert_equal 1, artifact.fetch("fixture_version")
       assert_equal fixture.fetch("observed_at"), artifact.fetch("observed_at")
@@ -40,6 +41,50 @@ class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
         observed_at: artifact.fetch("observed_at"))
       assert_equal first.normalized.value, replayed.value
       assert_equal first.normalized.request, replayed.request
+    end
+  end
+
+  test "preserves high precision decimal measurements through canonical artifact replay" do
+    fixture = fixture_for(:product)
+    exact = BigDecimal("123456789.123456789")
+    raw_body = JSON.generate(fixture.fetch("response")).sub(
+      '"variantWeight":250.5',
+      '"variantWeight":123456789.123456789'
+    )
+
+    result = validator.call(operation: :product, request: fixture.fetch("request"), raw_body:,
+      observed_at: fixture.fetch("observed_at"))
+
+    assert_equal exact, result.normalized.value.variants.first.weight.value
+    assert_includes result.artifact_bytes, '"variantWeight":123456789.123456789'
+    refute_includes result.artifact_bytes, '"variantWeight":"123456789.123456789"'
+
+    artifact = JSON.parse(result.artifact_bytes, decimal_class: BigDecimal)
+    replayed = Integrations::Cj::Normalizer.new.call(operation: :product,
+      body: JSON.generate(artifact.fetch("response")), request: artifact.fetch("request"),
+      observed_at: artifact.fetch("observed_at"))
+    assert_equal exact, replayed.value.variants.first.weight.value
+    assert_equal result.normalized.value, replayed.value
+  end
+
+  test "rejects positive negative and nonfinite numeric forms including discarded diagnostics" do
+    fixture = fixture_for(:product)
+    base = JSON.generate(fixture.fetch("response"))
+    bodies = [
+      base.sub('"variantWeight":250.5', '"variantWeight":1e400'),
+      base.sub('"variantWeight":250.5', '"variantWeight":-1e400'),
+      base.sub('"message":"Synthetic success"', '"message":1e400'),
+      base.sub('"message":"Synthetic success"', '"message":-1e400'),
+      base.sub('"message":"Synthetic success"', '"message":NaN'),
+      base.sub('"message":"Synthetic success"', '"message":Infinity'),
+      base.sub('"message":"Synthetic success"', '"message":-Infinity')
+    ]
+
+    bodies.each do |raw_body|
+      assert_sanitized_error do
+        validator.call(operation: :product, request: fixture.fetch("request"), raw_body:,
+          observed_at: fixture.fetch("observed_at"))
+      end
     end
   end
 
@@ -198,6 +243,33 @@ class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
     assert_empty log.string
   ensure
     Rails.logger = previous_logger
+  end
+
+  test "redacts string interpolation and refuses direct or nested YAML and Marshal serialization" do
+    fixture = fixture_for(:product)
+    sentinel = "SENTINEL-SUPPLIER-PAYLOAD"
+    body = fixture.fetch("response")
+    body.fetch("data")["description"] = sentinel
+    result = validator.call(operation: :product, request: fixture.fetch("request"),
+      raw_body: JSON.generate(body), observed_at: fixture.fetch("observed_at"))
+
+    assert_includes result.artifact_bytes, sentinel
+    assert_equal sentinel, result.normalized.value.description
+    refute_includes result.to_s, sentinel
+    refute_includes "captured=#{result}", sentinel
+
+    [ result, { "nested" => [ result ] } ].each do |value|
+      assert_raises(TypeError) { YAML.dump(value) }
+      assert_raises(TypeError) { Marshal.dump(value) }
+    end
+
+    output = StringIO.new
+    logger = ActiveSupport::Logger.new(output)
+    logger.info("captured=#{result}")
+    logger.info(result)
+    logger.info({ "nested" => [ result ] })
+    refute_includes output.string, sentinel
+    refute_includes output.string, result.artifact_bytes
   end
 
   test "performs no network database retry sleep or filesystem write" do

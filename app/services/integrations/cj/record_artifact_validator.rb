@@ -1,4 +1,5 @@
 require "digest"
+require "bigdecimal"
 require "json"
 require "time"
 
@@ -31,6 +32,8 @@ module Integrations
         clearanceOperationFee logisticAging logisticName logisticPrice taxesFee totalPostageFee
       ].freeze
       ACTIVE_ELEMENTS = "script, style, template, iframe, object".freeze
+      MAX_ABSOLUTE_NUMBER = BigDecimal("9999999999").freeze
+      MIN_DECIMAL_EXPONENT = -24
 
       class DuplicateKey < StandardError; end
 
@@ -52,6 +55,10 @@ module Integrations
             "artifact_sha256=#{artifact_sha256}>"
         end
 
+        def to_s
+          inspect
+        end
+
         def as_json(*)
           { "operation" => operation.to_s, "fixture_version" => FIXTURE_VERSION,
             "artifact_sha256" => artifact_sha256 }
@@ -59,6 +66,14 @@ module Integrations
 
         def to_json(...)
           as_json.to_json(...)
+        end
+
+        def encode_with(*)
+          raise TypeError, "CJ record artifact serialization is disabled"
+        end
+
+        def marshal_dump
+          raise TypeError, "CJ record artifact serialization is disabled"
         end
       end
 
@@ -74,6 +89,7 @@ module Integrations
         observed_at_copy = validate_observed_at!(observed_at)
         response, json_body = parse_response!(raw_body)
         reject_forbidden_keys!(response)
+        validate_numbers!(response)
 
         normalized = @normalizer.call(operation:, body: json_body, request: request_copy,
           observed_at: observed_at_copy)
@@ -81,7 +97,7 @@ module Integrations
         reject_active_content!(response)
         response.delete("message")
 
-        artifact_bytes = JSON.generate(
+        artifact_bytes = encode_json(
           "fixture_version" => FIXTURE_VERSION,
           "observed_at" => observed_at_copy,
           "request" => canonicalize(request_copy),
@@ -161,7 +177,8 @@ module Integrations
           json_body = raw_body.dup.force_encoding(Encoding::UTF_8)
           raise Error.new(:malformed_response) unless json_body.valid_encoding?
 
-          response = JSON.parse(json_body, max_nesting: 12, object_class: UniqueKeyHash)
+          response = JSON.parse(json_body, max_nesting: 12, object_class: UniqueKeyHash,
+            decimal_class: BigDecimal)
           raise Error.new(:malformed_response) unless response.instance_of?(UniqueKeyHash)
 
           [ response, json_body ]
@@ -204,6 +221,24 @@ module Integrations
               end
             when Array
               pending.concat(value)
+            end
+          end
+        end
+
+        def validate_numbers!(root)
+          pending = [ root ]
+          until pending.empty?
+            value = pending.pop
+            case value
+            when Hash then pending.concat(value.values)
+            when Array then pending.concat(value)
+            when Integer
+              raise Error.new(:malformed_response) if value.abs > MAX_ABSOLUTE_NUMBER
+            when BigDecimal
+              unless value.finite? && value.abs <= MAX_ABSOLUTE_NUMBER &&
+                  (value.zero? || value.exponent >= MIN_DECIMAL_EXPONENT)
+                raise Error.new(:malformed_response)
+              end
             end
           end
         end
@@ -269,6 +304,29 @@ module Integrations
             value.dup.freeze
           else
             value
+          end
+        end
+
+        def encode_json(value)
+          case value
+          when Hash
+            "{#{value.map { |key, child| "#{JSON.generate(key)}:#{encode_json(child)}" }.join(",")}}"
+          when Array
+            "[#{value.map { |child| encode_json(child) }.join(",")}]"
+          when String
+            JSON.generate(value)
+          when Integer
+            value.to_s
+          when BigDecimal
+            value.to_s("F")
+          when TrueClass
+            "true"
+          when FalseClass
+            "false"
+          when NilClass
+            "null"
+          else
+            raise Error.new(:malformed_response)
           end
         end
     end
