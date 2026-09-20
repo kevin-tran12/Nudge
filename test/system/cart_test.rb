@@ -13,20 +13,20 @@ class CartTest < ApplicationSystemTestCase
       set_viewport(width, height)
       visit product_path("00001234")
 
-      click_button "Add to cart"
+      click_button "Add to cart", match: :first
       assert_current_path cart_path
       assert_selector "h1", text: "Your cart"
-      assert_text "Stacking storage bin"
+      assert_text "Small bin"
       assert_no_horizontal_overflow(name)
       assert_minimum_target_sizes(name)
 
-      within "li", text: "Stacking storage bin" do
-        fill_in "Quantity for Stacking storage bin", with: "3"
+      within "li", text: "Small bin" do
+        fill_in "Quantity for Small bin", with: "3"
         click_button "Update"
       end
       assert_text "3", minimum: 1
 
-      within "li", text: "Stacking storage bin" do
+      within "li", text: "Small bin" do
         click_button "Remove"
       end
       assert_selector "h2", text: "Your cart is empty"
@@ -37,7 +37,7 @@ class CartTest < ApplicationSystemTestCase
   test "the cart page is reachable and operable with only the keyboard" do
     set_viewport(320, 720)
     visit product_path("00001234")
-    click_button "Add to cart"
+    click_button "Add to cart", match: :first
     visit cart_path
 
     send_key(:tab)
@@ -64,7 +64,7 @@ class CartTest < ApplicationSystemTestCase
 
     def assert_minimum_target_sizes(viewport)
       targets = page.evaluate_script(<<~JAVASCRIPT)
-        Array.from(document.querySelectorAll("a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex='-1'])"))
+        Array.from(document.querySelectorAll("a[href], button, input:not([type='hidden']), select, textarea, summary, [tabindex]:not([tabindex='-1'])"))
           .filter((element) => !element.disabled && getComputedStyle(element).visibility !== "hidden")
           .map((element) => {
             const rect = element.getBoundingClientRect();
