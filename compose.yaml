@@ -1,0 +1,51 @@
+name: nudge
+
+services:
+  db:
+    image: pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+    environment:
+      POSTGRES_USER: ${DB_USER:-nudge}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-nudge_local_only}
+      POSTGRES_DB: nudge_development
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    ports:
+      - "127.0.0.1:${DB_PORT_FORWARD:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+  app:
+    build:
+      context: .
+      target: development
+    init: true
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-nudge}
+      DB_PASSWORD: ${DB_PASSWORD:-nudge_local_only}
+      RAILS_ENV: ${RAILS_ENV:-development}
+      RAILS_MAX_THREADS: 5
+      PROVIDER_MODE: fixture
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "ruby", "-rnet/http", "-e", "exit(Net::HTTP.get_response(URI('http://127.0.0.1:3000/health/ready')).is_a?(Net::HTTPSuccess) ? 0 : 1)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    volumes:
+      - .:/rails
+    stdin_open: true
+    tty: true
+
+volumes:
+  postgres_data:

@@ -1,0 +1,71 @@
+# Rails/runtime
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+/storage/*
+!/storage/.keep
+/config/master.key
+/config/credentials/*.key
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Dependencies and build output
+/vendor/bundle
+/node_modules
+/public/assets
+/public/packs
+/coverage
+/work
+/app/assets/builds/*
+!/app/assets/builds/.keep
+
+# Local-only product planning. Keep every current and future planning artifact
+# under this directory so it cannot be committed or published accidentally.
+/.planning/
+
+# Local tooling
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.direnv/
+.envrc
+
+# Local credentials and private key material. Examples/templates are allowed;
+# real values belong in ignored local files or the deployment secret store.
+/.secrets/
+/secrets/
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+gcp-credentials.json
+service-account.json
+service-account-*.json
+
+# Terraform working data and local secrets
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+**/tfsecrets
+**/.tfsecrets
+**/*.tfsecrets
+!**/*.example
+!**/tfsecrets.example

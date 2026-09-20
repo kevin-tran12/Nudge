@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPOSE_ANSI: never
+  CI_IMAGE: nudge-ci:${{ github.sha }}
+  TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+
+jobs:
+  verify:
+    name: Test, quality, and security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build development image
+        run: docker compose build app
+
+      - name: Start database
+        run: docker compose up --detach --wait db
+
+      - name: Prepare test database
+        run: docker compose run --rm --no-deps -e RAILS_ENV=test app bin/rails db:prepare
+
+      - name: Run tests
+        run: docker compose run --rm --no-deps -e RAILS_ENV=test app bin/rails test
+
+      - name: Check Ruby style
+        run: docker compose run --rm --no-deps app bin/rubocop
+
+      - name: Audit Ruby dependencies
+        run: docker compose run --rm --no-deps app bin/bundler-audit
+
+      - name: Scan Rails application
+        run: docker compose run --rm --no-deps app bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error
+
+      - name: Build production image
+        run: docker build --target runtime --tag "$CI_IMAGE" .
+
+      - name: Verify production boot
+        run: docker run --rm -e RAILS_ENV=production -e SECRET_KEY_BASE_DUMMY=1 "$CI_IMAGE" bin/rails runner "Rails.application.eager_load!"
+
+      - name: Scan repository configuration and secrets
+        run: docker run --rm -v "$PWD:/workspace" "$TRIVY_IMAGE" fs --scanners secret,misconfig --exit-code 1 --severity HIGH,CRITICAL --skip-dirs .git /workspace
+
+      - name: Export production image for scanning
+        run: docker save --output /tmp/nudge-image.tar "$CI_IMAGE"
+
+      - name: Scan production image vulnerabilities
+        # Bundler Audit covers Ruby gems above. Limit this image scan to the
+        # operating-system packages so Trivy never downloads its Java database.
+        run: docker run --rm -v "/tmp:/scan" "$TRIVY_IMAGE" image --input /scan/nudge-image.tar --scanners vuln --pkg-types os --skip-java-db-update --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed
+
+      - name: Tear down test services
+        if: always()
+        run: docker compose down --volumes --remove-orphans

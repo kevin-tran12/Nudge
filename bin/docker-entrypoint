@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+
+require "fileutils"
+
+root = File.expand_path("..", __dir__)
+writable_paths = %w[log storage tmp app/assets/builds].map { |path| File.join(root, path) }
+
+if Process.uid.zero?
+  writable_paths.each do |path|
+    FileUtils.mkdir_p(path)
+    FileUtils.chown_R(1000, 1000, path)
+  end
+
+  Process::GID.change_privilege(1000)
+  Process::UID.change_privilege(1000)
+end
+
+FileUtils.rm_f(File.join(root, "tmp/pids/server.pid"))
+exec(*ARGV)
