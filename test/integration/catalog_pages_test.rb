@@ -7,7 +7,9 @@ class CatalogPagesTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_select "h1", text: "Browse the sample catalog"
     assert_select "[data-catalog-disclosure]", text: /illustrative/i
-    assert_select "article", count: 1
+    # The fixture catalog now holds 8 products (CAT-FIX-01); this replaces
+    # the old single-product assumption.
+    assert_select "article", count: Catalog::FixtureProductReader::DEFAULT_PRODUCT_IDS.size
     assert_select "a[href='#{product_path('00001234')}']", text: "Stacking storage bin"
     assert_select "[role='img'][data-local-placeholder]"
     assert_select "img", count: 0
@@ -72,7 +74,9 @@ class CatalogPagesTest < ActionDispatch::IntegrationTest
   end
 
   test "empty pages are explicit and do not imply zero priced products" do
-    get products_path(cursor: "1")
+    # The fixture catalog now holds 8 products (CAT-FIX-01); a cursor past
+    # the last item, not "1", is what now yields an empty page.
+    get products_path(cursor: Catalog::FixtureProductReader::DEFAULT_PRODUCT_IDS.size.to_s)
 
     assert_response :success
     assert_select "h1", text: "Browse the sample catalog"

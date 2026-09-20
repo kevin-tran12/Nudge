@@ -1,9 +1,13 @@
 {
-  "fixture_version": 1,
+  "fixture_version": 2,
   "observed_at": "2026-09-20T00:00:00Z",
-  "request": { "origin_country": "CN", "destination_country": "US", "items": [{ "variant_id": "00005678", "quantity": 1 }] },
-  "response": {
-    "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-freight-1",
-    "data": [{ "logisticName": "Fixture carrier", "logisticPrice": 4.71, "logisticAging": "7-12", "taxesFee": null, "clearanceOperationFee": null, "totalPostageFee": null }]
-  }
+  "entries": [
+    {
+      "request": { "origin_country": "CN", "destination_country": "US", "items": [{ "variant_id": "00005678", "quantity": 1 }] },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-freight-1",
+        "data": [{ "logisticName": "Fixture carrier", "logisticPrice": 4.71, "logisticAging": "7-12", "taxesFee": null, "clearanceOperationFee": null, "totalPostageFee": null }]
+      }
+    }
+  ]
 }

@@ -482,8 +482,17 @@ class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
       @validator ||= Integrations::Cj::RecordArtifactValidator.new
     end
 
+    # v2 fixture files hold a collection of request/response entries under a
+    # shared fixture_version/observed_at envelope (v1 held exactly one pair
+    # per file). This validator exercises the artifact envelope shape itself,
+    # so reconstruct the single canonical envelope from the first entry
+    # (00001234 / 00005678 / the sole freight quote), which is byte-identical
+    # to the original v1 request/response pair.
     def fixture_for(operation)
-      JSON.parse(FIXTURES.join("#{operation}.json").read)
+      fixture = JSON.parse(FIXTURES.join("#{operation}.json").read)
+      entry = fixture.fetch("entries").first
+      { "observed_at" => fixture.fetch("observed_at"), "request" => entry.fetch("request"),
+        "response" => entry.fetch("response") }
     end
 
     def result_for(operation)

@@ -2,7 +2,10 @@ require "uri"
 
 module Catalog
   class FixtureProductReader < ProductReader
-    DEFAULT_PRODUCT_IDS = [ "00001234" ].freeze
+    DEFAULT_PRODUCT_IDS = [
+      "00001234", "00002001", "00002002", "00002003",
+      "00002004", "00002005", "00002006", "00002007"
+    ].freeze
     APPROVED_MEDIA_HOSTS = %w[
       cf.cjdropshipping.com
       cc-west-usa.oss-us-west-1.aliyuncs.com
