@@ -1,2 +1,9 @@
 #!/usr/bin/env ruby
+if ENV.fetch("RAILS_ENV", "development") == "development"
+  # A prior precompile makes Propshaft ignore the current watched CSS.
+  # Remove only its generated manifest; preserve source assets and named volumes.
+  manifest = File.expand_path("../public/assets/.manifest.json", __dir__)
+  File.delete(manifest) if File.exist?(manifest)
+end
+
 exec "./bin/rails", "server", *ARGV

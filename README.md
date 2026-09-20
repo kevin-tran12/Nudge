@@ -24,6 +24,14 @@ docker compose run --rm app bin/bundler-audit
 
 The development image and Compose service run as UID/GID `1000:1000`. Writable runtime directories use named volumes layered beneath the source bind mount, keeping source reloads portable across Docker Desktop and Linux without a root Rails process. Provider modes are fixed to fixtures for ordinary development and tests; the entrypoint refuses a non-fixture override.
 
+Development starts through `bin/dev`, which removes only the generated `public/assets/.manifest.json` before Rails boots. This prevents an earlier precompile from hiding current CSS. The existing Puma Tailwind plugin builds and watches CSS in the retained asset volume. Production continues to use its precompiled manifest.
+
+Check development asset refresh, restart, and watcher shutdown without a database:
+
+```bash
+docker compose run --rm --no-deps app ruby test/runtime/development_assets_contract.rb
+```
+
 Inspect logs without entering the container:
 
 ```bash
