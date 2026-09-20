@@ -70,8 +70,10 @@
     this.statusEl = root.querySelector("[data-voice-status]");
     this.fallback = root.querySelector("[data-voice-fallback]");
     this.widgetMount = root.querySelector("[data-voice-widget-mount]");
+    this.disclosureTrigger = null;
 
     this.bind();
+    this.bindDisclosureDialog();
     this.render();
   }
 
@@ -104,6 +106,47 @@
     }
   };
 
+  // The disclosure is a native <dialog> opened with showModal(), which gives
+  // us a real focus trap and default "focus moves in on open" behavior for
+  // free. We still own the open/close transitions so they stay in lockstep
+  // with voice state, and we listen for the dialog's own "cancel" event
+  // (fired for Escape and any other native dismissal) so that closing the
+  // dialog by any means is always equivalent to pressing "Not now": it never
+  // starts voice.
+  VoiceLauncher.prototype.bindDisclosureDialog = function () {
+    var self = this;
+    var dialog = this.disclosure;
+    if (!dialog) return;
+
+    dialog.addEventListener("cancel", function (event) {
+      event.preventDefault();
+      self.setState("idle");
+    });
+
+    dialog.addEventListener("close", function () {
+      var trigger = self.disclosureTrigger;
+      self.disclosureTrigger = null;
+      if (trigger && typeof trigger.focus === "function") {
+        trigger.focus();
+      }
+    });
+  };
+
+  VoiceLauncher.prototype.syncDisclosureDialog = function (state) {
+    var dialog = this.disclosure;
+    if (!dialog || typeof dialog.showModal !== "function") return;
+
+    var shouldBeOpen = state === "disclosure_required";
+    if (shouldBeOpen) {
+      if (!dialog.open) {
+        this.disclosureTrigger = document.activeElement;
+        dialog.showModal();
+      }
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  };
+
   VoiceLauncher.prototype.setState = function (next) {
     if (STATES.indexOf(next) === -1) return;
     this.state = next;
@@ -114,7 +157,7 @@
     var state = this.state;
     this.root.setAttribute("data-voice-state", state);
 
-    setSectionVisible(this.disclosure, state === "disclosure_required");
+    this.syncDisclosureDialog(state);
     setSectionVisible(this.fallback, !!FALLBACK_STATES[state]);
 
     var message = STATUS_COPY[state] || "";

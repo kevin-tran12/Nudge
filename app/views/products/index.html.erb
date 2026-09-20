@@ -12,13 +12,19 @@
   </div>
 
   <div class="mt-8">
-    <%= render "shared/voice_launcher" %>
+    <%= render "shared/catalog_search", query: @query %>
   </div>
 
   <% if @page.items.any? %>
     <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
       <%= render partial: "shared/catalog/product_card", collection: @page.items, as: :product %>
     </div>
+  <% elsif @query %>
+    <section class="mt-8 rounded-card border border-line bg-surface p-6 shadow-card sm:p-8">
+      <h2 class="font-display text-2xl font-bold text-ink">No results for &ldquo;<%= @query %>&rdquo;</h2>
+      <p class="mt-2 text-muted">Try a different search, or browse the full sample catalog.</p>
+      <div class="mt-5"><%= render "shared/button", label: "Browse full catalog", href: products_path, variant: :secondary %></div>
+    </section>
   <% else %>
     <section class="mt-8 rounded-card border border-line bg-surface p-6 shadow-card sm:p-8">
       <h2 class="font-display text-2xl font-bold text-ink">No sample products on this page</h2>
