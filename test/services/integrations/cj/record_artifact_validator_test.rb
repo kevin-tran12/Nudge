@@ -67,6 +67,189 @@ class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
     assert_equal result.normalized.value, replayed.value
   end
 
+  test "reads every captured operation as the identical immutable result" do
+    %i[product inventory freight].each do |operation|
+      captured = result_for(operation)
+      input = captured.artifact_bytes.dup
+      snapshot = input.dup
+
+      replayed = validator.read(operation:, artifact_bytes: input)
+
+      assert_equal captured, replayed
+      assert_equal snapshot, input
+      refute input.frozen?
+      assert replayed.frozen?
+      assert replayed.artifact_bytes.frozen?
+      assert replayed.artifact_sha256.frozen?
+      assert replayed.normalized.frozen?
+      assert replayed.normalized.request.frozen?
+      assert_raises(FrozenError) { replayed.artifact_bytes << "changed" }
+      assert_raises(FrozenError) { replayed.normalized.request.values.first.replace("changed") }
+      input.replace("changed")
+      assert_equal captured, replayed
+    end
+  end
+
+  test "reads reordered whitespace padded UTF-8 bytes with the same canonical bytes and hash" do
+    captured = result_for(:product)
+    envelope = JSON.parse(captured.artifact_bytes)
+    envelope["response"] = envelope.fetch("response").to_a.reverse.to_h
+    bytes = " \n#{JSON.pretty_generate(envelope.to_a.reverse.to_h)}\t ".b
+    snapshot = bytes.dup
+
+    replayed = validator.read(operation: :product, artifact_bytes: bytes)
+
+    assert_equal captured, replayed
+    assert_equal snapshot, bytes
+    assert_equal Encoding::ASCII_8BIT, bytes.encoding
+    assert_equal Encoding::UTF_8, replayed.artifact_bytes.encoding
+  end
+
+  test "reads exact decimals without floating point or quoted number conversion" do
+    captured = result_for(:product)
+    bytes = captured.artifact_bytes.sub('"variantWeight":250.5', '"variantWeight":123456789.123456789')
+
+    replayed = validator.read(operation: :product, artifact_bytes: bytes)
+
+    assert_equal BigDecimal("123456789.123456789"), replayed.normalized.value.variants.first.weight.value
+    assert_includes replayed.artifact_bytes, '"variantWeight":123456789.123456789'
+    assert_equal replayed, validator.read(operation: :product, artifact_bytes: replayed.artifact_bytes)
+  end
+
+  test "reads at most one MiB while preserving the provider response size limit" do
+    captured = result_for(:product)
+    limit = 1_048_576
+    padded = captured.artifact_bytes.ljust(limit)
+    assert_equal captured, validator.read(operation: :product, artifact_bytes: padded)
+    assert_sanitized_error { validator.read(operation: :product, artifact_bytes: padded + " ") }
+
+    envelope = JSON.parse(captured.artifact_bytes)
+    envelope.fetch("response")["message"] = "x" * Integrations::Cj::Normalizer::MAX_BODY_BYTES
+    assert_sanitized_error { validator.read(operation: :product, artifact_bytes: JSON.generate(envelope)) }
+  end
+
+  test "rejects invalid read operations and accepts bytes rather than IO paths or objects" do
+    captured = result_for(:product)
+    [ "product", :unknown, nil, true ].each do |operation|
+      assert_error(:invalid_input) { validator.read(operation:, artifact_bytes: captured.artifact_bytes) }
+    end
+    [ nil, {}, [], StringIO.new(captured.artifact_bytes), Pathname.new("product.json"),
+      "product.json", "file:///product.json", "https://example.invalid/product.json" ].each do |artifact_bytes|
+      assert_sanitized_error { validator.read(operation: :product, artifact_bytes:) }
+    end
+  end
+
+  test "requires an exact v1 artifact envelope" do
+    envelope = JSON.parse(result_for(:product).artifact_bytes)
+    variants = [ [], nil, true, {}, envelope.merge("operation" => "product"),
+      envelope.merge("extra" => "SYNTHETIC-SECRET") ]
+    envelope.each_key { |key| variants << envelope.except(key) }
+    [ nil, true, "1", 1.0, 0, 2, -1 ].each do |version|
+      variants << envelope.merge("fixture_version" => version)
+    end
+    variants.each do |value|
+      assert_sanitized_error { validator.read(operation: :product, artifact_bytes: JSON.generate(value)) }
+    end
+  end
+
+  test "revalidates request identity and canonical observation time on read" do
+    envelope = JSON.parse(result_for(:product).artifact_bytes)
+    [ {}, { "product_id" => "../secret" }, { "product_id" => "x" * 201 },
+      { "product_id" => "00001234", "extra" => true } ].each do |request|
+      bytes = JSON.generate(envelope.merge("request" => request))
+      assert_sanitized_error(code: :invalid_input) { validator.read(operation: :product, artifact_bytes: bytes) }
+    end
+    [ nil, "2026-09-20", "2026-09-20T00:00:00+00:00", "2026-09-20T00:00:00.100Z",
+      "2026-02-30T00:00:00Z", "2026-09-20T00:00:00Z\n" ].each do |observed_at|
+      bytes = JSON.generate(envelope.merge("observed_at" => observed_at))
+      assert_sanitized_error(code: :invalid_input) { validator.read(operation: :product, artifact_bytes: bytes) }
+    end
+    bytes = JSON.generate(envelope.merge("request" => { "product_id" => "different" }))
+    assert_sanitized_error { validator.read(operation: :product, artifact_bytes: bytes) }
+    assert_sanitized_error(code: :invalid_input) do
+      validator.read(operation: :inventory, artifact_bytes: JSON.generate(envelope))
+    end
+  end
+
+  test "rejects duplicate keys at every envelope boundary including escaped equivalent keys" do
+    captured = result_for(:product).artifact_bytes
+    [ captured.sub('"fixture_version":1', '"fixture_version":1,"fixture_version":1'),
+      captured.sub('"fixture_version":1', '"fixture_version":1,"fixture_versi\u006fn":1'),
+      captured.sub('"product_id":"00001234"', '"product_id":"00001234","product_id":"00001234"'),
+      captured.sub('"code":200', '"code":200,"code":200'),
+      captured.sub('"vid":"00005678"', '"vid":"00005678","vid":"00005678"') ].each do |bytes|
+      refute_equal captured, bytes
+      assert_sanitized_error { validator.read(operation: :product, artifact_bytes: bytes) }
+    end
+  end
+
+  test "rejects malformed invalid UTF-8 excessive nesting and all out of bound numbers on read" do
+    captured = result_for(:product).artifact_bytes
+    invalid = [ "", "{", captured + "{}", captured.b + "\xFF".b,
+      captured.encode(Encoding::UTF_16LE), "[" * 30 + "]" * 30 ]
+    %w[NaN Infinity -Infinity 1e400 -1e400 10000000000 -10000000000 1e-1000000 -1e-1000000].each do |number|
+      invalid << captured.sub('"variantWeight":250.5', "\"variantWeight\":#{number}")
+      invalid << captured.sub('"code":200', "\"message\":#{number},\"code\":200")
+    end
+    invalid.each do |bytes|
+      assert_sanitized_error { validator.read(operation: :product, artifact_bytes: bytes) }
+    end
+  end
+
+  test "reapplies provider allowlists forbidden keys active content and URL safety on read" do
+    envelope = JSON.parse(result_for(:product).artifact_bytes)
+    mutations = [
+      ->(response) { response["newProviderField"] = "SYNTHETIC-SECRET" },
+      ->(response) { response.fetch("data").fetch("variants").first["ACCESS_TOKEN"] = "SYNTHETIC-SECRET" },
+      ->(response) { response.fetch("data")["description"] = "<script>SYNTHETIC-SECRET</script>" },
+      ->(response) { response.fetch("data")["pid"] = "different" }
+    ]
+    mutations.each do |mutation|
+      copy = envelope.deep_dup
+      mutation.call(copy.fetch("response"))
+      assert_sanitized_error { validator.read(operation: :product, artifact_bytes: JSON.generate(copy)) }
+    end
+    envelope.fetch("response").fetch("data")["productImageSet"] = [ "javascript:SYNTHETIC-SECRET" ]
+    assert_sanitized_error(code: :unsafe_url) do
+      validator.read(operation: :product, artifact_bytes: JSON.generate(envelope))
+    end
+  end
+
+  test "read results redact direct and nested serialization logs and dependency causes" do
+    captured = result_for(:product)
+    bytes = captured.artifact_bytes.sub('"productNameEn":"', '"productNameEn":"SYNTHETIC-SECRET ')
+    assert_includes bytes, "SYNTHETIC-SECRET"
+    result = validator.read(operation: :product, artifact_bytes: bytes)
+    [ result, { "nested" => [ result ] } ].each do |value|
+      [ value.inspect, value.to_s, value.as_json.inspect, value.to_json, JSON.generate(value) ].each do |output|
+        refute_includes output, "SYNTHETIC-SECRET"
+      end
+      assert_raises(TypeError) { YAML.dump(value) }
+      assert_raises(TypeError) { Marshal.dump(value) }
+    end
+    log = StringIO.new
+    logger = ActiveSupport::Logger.new(log)
+    logger.info(result)
+    logger.info("captured=#{result}")
+    logger.info({ "nested" => [ result ] })
+    refute_includes log.string, "SYNTHETIC-SECRET"
+
+    [ RuntimeError.new("SYNTHETIC-SECRET"), Integrations::Cj::Error.new(:authentication_failed) ].each do |failure|
+      normalizer = Object.new
+      normalizer.define_singleton_method(:call) do |**|
+        begin
+          raise "SYNTHETIC-SECRET"
+        rescue RuntimeError
+          raise failure
+        end
+      end
+      code = failure.is_a?(Integrations::Cj::Error) ? :authentication_failed : :malformed_response
+      assert_sanitized_error(code:) do
+        Integrations::Cj::RecordArtifactValidator.new(normalizer:).read(operation: :product, artifact_bytes: bytes)
+      end
+    end
+  end
+
   test "rejects positive negative and nonfinite numeric forms including discarded diagnostics" do
     fixture = fixture_for(:product)
     base = JSON.generate(fixture.fetch("response"))

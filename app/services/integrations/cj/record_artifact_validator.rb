@@ -10,6 +10,8 @@ module Integrations
     # offline: it owns no transport, credentials, mode, budget, clock, or path.
     class RecordArtifactValidator
       FIXTURE_VERSION = 1
+      MAX_ARTIFACT_BYTES = 1_048_576
+      ARTIFACT_KEYS = %w[fixture_version observed_at request response].freeze
       OPERATIONS = %i[product inventory freight].freeze
       IDENTIFIER = /\A[A-Za-z0-9_{}-]+\z/
       COUNTRY = /\A[A-Z]{2}\z/
@@ -117,6 +119,26 @@ module Integrations
         raise Error.new(:malformed_response), cause: nil
       end
 
+      # Replays untrusted, in-memory v1 bytes through the capture boundary. The
+      # extra nesting level belongs to the envelope; the provider body retains
+      # its own smaller byte and nesting limits. No path or IO is accepted.
+      def read(operation:, artifact_bytes:)
+        validate_operation!(operation)
+        artifact, = parse_json!(artifact_bytes, max_bytes: MAX_ARTIFACT_BYTES, max_nesting: 13)
+        unless artifact.keys.sort == ARTIFACT_KEYS &&
+            artifact["fixture_version"].instance_of?(Integer) && artifact["fixture_version"] == FIXTURE_VERSION
+          raise Error.new(:malformed_response)
+        end
+        validate_numbers!(artifact)
+
+        call(operation:, request: canonicalize(artifact.fetch("request")),
+          raw_body: encode_json(artifact.fetch("response")), observed_at: artifact.fetch("observed_at"))
+      rescue Error => error
+        raise Error.new(error.code), cause: nil
+      rescue StandardError
+        raise Error.new(:malformed_response), cause: nil
+      end
+
       private
         def validate_operation!(operation)
           raise Error.new(:invalid_input) unless OPERATIONS.include?(operation)
@@ -170,14 +192,18 @@ module Integrations
         end
 
         def parse_response!(raw_body)
-          unless raw_body.is_a?(String) && raw_body.bytesize <= Normalizer::MAX_BODY_BYTES
+          parse_json!(raw_body, max_bytes: Normalizer::MAX_BODY_BYTES, max_nesting: 12)
+        end
+
+        def parse_json!(raw_body, max_bytes:, max_nesting:)
+          unless raw_body.is_a?(String) && raw_body.bytesize <= max_bytes
             raise Error.new(:malformed_response)
           end
 
           json_body = raw_body.dup.force_encoding(Encoding::UTF_8)
           raise Error.new(:malformed_response) unless json_body.valid_encoding?
 
-          response = JSON.parse(json_body, max_nesting: 12, object_class: UniqueKeyHash,
+          response = JSON.parse(json_body, max_nesting:, object_class: UniqueKeyHash,
             decimal_class: BigDecimal)
           raise Error.new(:malformed_response) unless response.instance_of?(UniqueKeyHash)
 
