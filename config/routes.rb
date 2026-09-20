@@ -10,5 +10,9 @@ Rails.application.routes.draw do
 
   resources :products, only: %i[index show]
 
+  namespace :voice do
+    post "tools/:tool_name" => "tools#call", as: :tool
+  end
+
   root "home#show"
 end
