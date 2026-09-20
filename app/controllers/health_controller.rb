@@ -5,11 +5,11 @@ class HealthController < ApplicationController
 
   def ready
     ActiveRecord::Base.connection_pool.with_connection do |connection|
-      connection.select_value("SELECT 1")
+      Nudge::DatabaseCompatibility.verify!(connection)
     end
 
     render json: { status: "ok" }
-  rescue ActiveRecord::ActiveRecordError
+  rescue ActiveRecord::ActiveRecordError, Nudge::DatabaseCompatibility::IncompatibleDatabaseError
     Rails.logger.warn(event: "readiness_check_failed", dependency: "database")
     render json: { status: "unavailable" }, status: :service_unavailable
   end

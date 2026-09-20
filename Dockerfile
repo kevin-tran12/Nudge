@@ -1,6 +1,14 @@
 # syntax=docker/dockerfile:1.7
 
 ARG RUBY_IMAGE=ruby:4.0.7-slim-trixie@sha256:d10bdb076bb10d2261773ea20eadf4cdbde3346fc8f8db409856608b2d01b9c9
+ARG POSTGRES_IMAGE=pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e
+
+FROM ${POSTGRES_IMAGE} AS postgres_tools
+
+RUN set -eux; \
+    libpq_path="$(find /usr/lib -name 'libpq.so.5.18' -print -quit)"; \
+    test -n "${libpq_path}"; \
+    cp "${libpq_path}" /tmp/libpq.so.5
 
 FROM ${RUBY_IMAGE} AS base
 
@@ -8,6 +16,7 @@ WORKDIR /rails
 
 ENV BUNDLE_PATH=/usr/local/bundle \
     BUNDLE_WITHOUT=development:test \
+    LD_LIBRARY_PATH=/usr/local/lib \
     RAILS_LOG_TO_STDOUT=1
 
 RUN apt-get update -qq && \
@@ -17,6 +26,10 @@ RUN apt-get update -qq && \
     useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash && \
     mkdir -p log storage tmp app/assets/builds /coverage && \
     chown -R rails:rails /home/rails log storage tmp app/assets/builds /coverage
+
+COPY --from=postgres_tools /usr/lib/postgresql/18/bin/pg_dump /usr/local/bin/pg_dump
+COPY --from=postgres_tools /usr/lib/postgresql/18/bin/psql /usr/local/bin/psql
+COPY --from=postgres_tools /tmp/libpq.so.5 /usr/local/lib/libpq.so.5
 
 FROM base AS build
 

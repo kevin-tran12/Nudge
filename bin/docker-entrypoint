@@ -21,4 +21,13 @@ end
 
 writable_paths.each { |path| FileUtils.mkdir_p(path) }
 FileUtils.rm_f(File.join(root, "tmp/pids/server.pid"))
+
+rails_command = File.basename(ARGV.first.to_s) == "rails"
+rails_server = rails_command && %w[server s].include?(ARGV[1])
+
+if ENV["RAILS_ENV"] == "production" && rails_server
+  compatibility_check = system(File.join(root, "bin/rails"), "db:verify_compatibility")
+  abort "Database compatibility check failed" unless compatibility_check
+end
+
 exec(*ARGV)
