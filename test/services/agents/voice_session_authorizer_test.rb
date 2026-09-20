@@ -83,11 +83,12 @@ class VoiceSessionAuthorizerTest < ActiveSupport::TestCase
 
     authorizer.call(cookie: build_cookie, context: context, expected_hostname: "shop.example.test")
 
-    error = assert_raises(Agents::VoiceSessionAuthorizer::Error) do
-      authorizer.call(cookie: build_cookie, context: context, expected_hostname: "shop.example.test")
-    end
-    assert_equal :grant_conflict, error.code
+    # Re-authorization supersedes rather than refusing, but the one-active-grant
+    # invariant still holds: the prior grant is expired before the new one exists.
+    authorizer.call(cookie: build_cookie, context: context, expected_hostname: "shop.example.test")
+
     assert_equal 1, AiAccessGrant.where(shopping_session: session, status: "active").count
+    assert_equal 1, AiAccessGrant.where(shopping_session: session, status: "expired").count
   end
 
   test "rejects malformed input before touching the database" do
