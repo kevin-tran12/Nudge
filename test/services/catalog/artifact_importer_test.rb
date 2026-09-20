@@ -657,7 +657,7 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     end
 
     def tables
-      %w[sync_checkpoints sync_runs inventory_observations price_observations supplier_observations
+      %w[sync_checkpoints sync_runs catalog_media inventory_observations price_observations supplier_observations
         supplier_warehouses supplier_variants supplier_products product_variants products suppliers]
     end
 

@@ -1,5 +1,6 @@
 require "digest"
 require "json"
+require "uri"
 
 module Catalog
   class ArtifactImporter
@@ -160,6 +161,7 @@ module Catalog
       def preflight_product(context)
         value = context.validated.normalized.value
         title = normalized_title(value.title)
+        image_urls = validate_media_urls!(value.image_urls)
         variants = value.variants.map do |variant|
           ensure_decimal_measurements!(variant)
           { value: variant, title: normalized_title(variant.title) }
@@ -191,7 +193,7 @@ module Catalog
         created = (supplier_product ? 0 : 1) + variant_plans.count { |entry| entry[:supplier_variant].nil? }
         updated = (supplier_product ? 1 : 0) + variant_plans.count { |entry| entry[:supplier_variant] }
         counts = count_hash(seen: 1 + variant_plans.size, created:, updated:)
-        { value:, title:, supplier_product:, variants: variant_plans,
+        { value:, title:, supplier_product:, variants: variant_plans, image_urls:,
           observation_copies: 1 + variant_plans.size, counts: }
       end
 
@@ -301,6 +303,60 @@ module Catalog
         end
       end
 
+      # Supplier image URLs are untrusted input (CAT-MEDIA-01): re-validate
+      # them here at persistence time against the same approved-host rule
+      # Catalog::DatabaseProductReader enforces at read time, rather than
+      # trusting that Integrations::Cj::Normalizer already filtered them. Any
+      # URL that fails fails the whole import, exactly like every other
+      # malformed-artifact rejection in this class (e.g. :blank_title,
+      # :decimal_not_representable): a single bad image never causes a
+      # partially-imported product, and it produces the same explicit,
+      # auditable failure code as those checks instead of silently dropping
+      # a picture and letting the rest of the import appear to succeed.
+      def validate_media_urls!(urls)
+        return [] if urls.nil?
+
+        urls.each { |url| validate_media_url!(url) }
+        urls
+      end
+
+      def validate_media_url!(url)
+        unless url.is_a?(String) && url.encoding == Encoding::UTF_8 && url.valid_encoding? &&
+            url.bytesize.between?(1, 2048)
+          raise Error.new(:unsafe_media_url)
+        end
+
+        uri = URI.parse(url)
+        unless uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && uri.query.nil? &&
+            uri.fragment.nil? && FixtureProductReader::APPROVED_MEDIA_HOSTS.include?(uri.host) &&
+            uri.path.start_with?("/") && !uri.path.split("/").include?("..") && !uri.path.include?("%")
+          raise Error.new(:unsafe_media_url)
+        end
+      rescue URI::InvalidURIError
+        raise Error.new(:unsafe_media_url), cause: nil
+      end
+
+      # Reconciles catalog_media for this product to exactly the validated
+      # image_urls from this artifact: existing rows are matched by
+      # sanitized_url and updated in place (position/observed_at/the
+      # supplier_observation pointer), new URLs are inserted, and rows for
+      # URLs no longer present are removed. Re-importing identical bytes
+      # never reaches this method at all (the exact-artifact replay check in
+      # #call short-circuits first), so this only runs when the artifact
+      # actually changed, and it converges rather than accumulating rows.
+      def sync_product_images!(context, product, observation, image_urls)
+        existing = CatalogMedia.where(product_id: product.id, kind: "image").index_by(&:sanitized_url)
+
+        image_urls.each_with_index do |url, position|
+          media = existing.delete(url) || CatalogMedia.new(product_id: product.id, kind: "image")
+          media.assign_attributes(position:, status: "active", observed_at: context.observed_at,
+            supplier_observation_id: observation.id, sanitized_url: url)
+          media.save!
+        end
+
+        existing.each_value(&:destroy!)
+      end
+
       def normalized_title(value)
         title = value&.strip
         raise Error.new(:blank_title) if title.blank?
@@ -345,6 +401,7 @@ module Catalog
         product_observation = create_observation!(context, resource_kind: "product",
           external_resource_id: value.external_id)
         product_reference.update!(latest_observation: product_observation)
+        sync_product_images!(context, product, product_observation, plan.fetch(:image_urls))
 
         plan.fetch(:variants).each do |entry|
           apply_variant(context, product_reference, product, entry)
