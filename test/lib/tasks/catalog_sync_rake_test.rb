@@ -43,8 +43,14 @@ class CatalogSyncRakeTest < ActiveSupport::TestCase
   end
 
   test "record mode still fails closed in a deployment that does not allow it" do
-    Supplier.create!(key: "cj", display_name: "CJ Dropshipping", adapter_version: "1",
-      api_version: "v1", status: "active")
+    # db:prepare seeds this row on a fresh database, so the test must tolerate
+    # it already existing rather than assume it creates it.
+    Supplier.find_or_create_by!(key: "cj") do |supplier|
+      supplier.display_name = "CJ Dropshipping"
+      supplier.adapter_version = "1"
+      supplier.api_version = "v1"
+      supplier.status = "active"
+    end
     error = nil
     with_env({ "CATALOG_SYNC_MODE" => "record", "CATALOG_SYNC_CATEGORY" => "home" },
       credential: "synthetic-not-a-real-key") do
