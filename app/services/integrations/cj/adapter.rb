@@ -175,15 +175,21 @@ module Integrations
           value
         end
 
+        # Filter strings are outgoing single-line query parameters (category
+        # id / keyword), not multiline supplier text -- every C0/C1 control
+        # character (including tab, CR, LF) is rejected here rather than the
+        # narrower allowance Normalizer uses for incoming supplier text.
         def optional_filter(value)
           return nil if value.nil?
           unless value.is_a?(String) && value.valid_encoding? && value.bytesize.between?(1, MAX_FILTER_BYTES) &&
-              !value.match?(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/)
+              !value.match?(CONTROL_CHARACTERS)
             raise Error.new(:invalid_input)
           end
 
           value.dup
         end
+
+        CONTROL_CHARACTERS = Regexp.new("[\x00-\x1f\x7f]").freeze
     end
   end
 end
