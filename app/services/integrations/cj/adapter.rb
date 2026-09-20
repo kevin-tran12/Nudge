@@ -13,20 +13,31 @@ module Integrations
     # lifecycle, performed through Transport, and normalized through
     # Normalizer -- no raw provider object ever escapes this class.
     class Adapter
-      # Points-per-call estimates. Only the 50-point Product List V2 cost is
-      # currently confirmed by documentation evidence
-      # (.planning/CJ_SCHEMA_EVIDENCE.md); the others are conservative
-      # placeholders pending an owner-authorized bounded verify/record capture.
-      POINTS = { product: 50, inventory: 10, freight: 10 }.freeze
+      # Points-per-call estimates. The 50-point cost for `product_list`
+      # (Product List V2) is the only one currently confirmed by documentation
+      # evidence (.planning/CJ_SCHEMA_EVIDENCE.md) and is also used as the
+      # pre-existing `product` cost estimate; inventory and freight remain
+      # conservative placeholders pending an owner-authorized bounded
+      # verify/record capture.
+      POINTS = { product: 50, inventory: 10, freight: 10, product_list: 50 }.freeze
       AUTH_POINTS = 1
 
-      # product/inventory read the catalog partition; freight is consulted at
-      # checkout-adjacent, fulfillment-critical points (TRD 6.2 purpose split).
-      PURPOSES = { product: :catalog, inventory: :catalog, freight: :critical }.freeze
+      # product/inventory/product_list read the catalog partition; freight is
+      # consulted at checkout-adjacent, fulfillment-critical points (TRD 6.2
+      # purpose split).
+      PURPOSES = { product: :catalog, inventory: :catalog, freight: :critical, product_list: :catalog }.freeze
 
       MAX_ATTEMPTS = 3
       MAX_RETRY_DELAY = 30.0
       DEFAULT_RETRY_DELAY = 1.0
+
+      # Product List V2 pagination bounds. The exact CJ-documented maximum page
+      # size is not yet verified (.planning/CJ_SCHEMA_EVIDENCE.md); 200 is a
+      # conservative inferred ceiling pending an owner-authorized bounded
+      # verify/record capture. Callers must paginate themselves -- this
+      # adapter never loops internally to fetch multiple pages.
+      MAX_PAGE_SIZE = 200
+      MAX_FILTER_BYTES = 100
 
       attr_reader :mode
 
@@ -58,6 +69,19 @@ module Integrations
 
       def inventory(variant_id:)
         call(:inventory, "variant_id" => identifier(variant_id))
+      end
+
+      # Returns one page of product summaries. Bounded and non-recursive: the
+      # caller must paginate by incrementing +page+ across calls, so point
+      # spend stays visible and attributable per call. At least one of
+      # +category+ or +keyword+ must be supplied.
+      def product_list(page:, page_size:, category: nil, keyword: nil)
+        cat = optional_filter(category)
+        kw = optional_filter(keyword)
+        raise Error.new(:invalid_input) if cat.nil? && kw.nil?
+
+        call(:product_list, "pageNum" => page_number(page), "pageSize" => bounded_page_size(page_size),
+          "categoryId" => cat, "keyword" => kw)
       end
 
       def freight(origin_country:, destination_country:, items:)
@@ -138,6 +162,34 @@ module Integrations
 
           value.dup
         end
+
+        def page_number(value)
+          raise Error.new(:invalid_input) unless value.is_a?(Integer) && value >= 1
+
+          value
+        end
+
+        def bounded_page_size(value)
+          raise Error.new(:invalid_input) unless value.is_a?(Integer) && value.between?(1, MAX_PAGE_SIZE)
+
+          value
+        end
+
+        # Filter strings are outgoing single-line query parameters (category
+        # id / keyword), not multiline supplier text -- every C0/C1 control
+        # character (including tab, CR, LF) is rejected here rather than the
+        # narrower allowance Normalizer uses for incoming supplier text.
+        def optional_filter(value)
+          return nil if value.nil?
+          unless value.is_a?(String) && value.valid_encoding? && value.bytesize.between?(1, MAX_FILTER_BYTES) &&
+              !value.match?(CONTROL_CHARACTERS)
+            raise Error.new(:invalid_input)
+          end
+
+          value.dup
+        end
+
+        CONTROL_CHARACTERS = Regexp.new("[\x00-\x1f\x7f]").freeze
     end
   end
 end

@@ -4,7 +4,7 @@ module Integrations
   module Cj
     class FixtureSource
       ROOT = Rails.root.join("test/fixtures/files/cj/v1")
-      OPERATIONS = %i[product inventory freight].freeze
+      OPERATIONS = %i[product inventory freight product_list].freeze
       SCENARIOS = %i[success throttled expired_auth malformed].freeze
       # v2: each operation file holds a collection of request/response entries
       # (v1 held exactly one), looked up by exact request match. Bumped so a

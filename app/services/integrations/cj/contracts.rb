@@ -13,6 +13,8 @@ module Integrations
       Subwarehouse = Data.define(:external_id, :cj_quantity, :factory_quantity)
       Freight = Data.define(:service_name, :price, :tax, :clearance_fee, :total_price,
         :delivery_estimate, :kind, :eligibility, :expires_at)
+      ProductSummary = Data.define(:external_id, :sku, :title, :image_url, :price)
+      ProductListPage = Data.define(:products, :page, :page_size, :total_count, :has_more)
 
       def self.deep_freeze(value)
         case value
