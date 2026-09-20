@@ -129,7 +129,8 @@ module Checkout
 
       original = Net::HTTP.method(:start)
       Net::HTTP.define_singleton_method(:start) { |*| raise "ConfirmCheckout attempted a live HTTP call" }
-      ConfirmCheckout.new(**urls).call(shopping_session: session, public_id: public_id)
+      result = ConfirmCheckout.new(**urls).call(shopping_session: session, public_id: public_id)
+      refute result.paid
     ensure
       Net::HTTP.define_singleton_method(:start, original) if original
     end

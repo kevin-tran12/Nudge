@@ -16,11 +16,11 @@ class CheckoutControllerTest < ActionDispatch::IntegrationTest
     travel_back
   end
 
-  test "GET /checkout without a shopping session refuses instead of showing prices" do
+  test "GET /checkout without a shopping session shows an empty cart, never a price" do
     get new_checkout_path
 
-    assert_response :unprocessable_entity
-    assert_select "h1", "Checkout unavailable"
+    assert_response :success
+    assert_select "h2", "Your cart is empty"
   end
 
   test "GET /checkout shows the server-recomputed cart total" do

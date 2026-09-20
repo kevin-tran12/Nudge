@@ -10,7 +10,7 @@ Rails.application.routes.draw do
 
   resources :products, only: %i[index show]
 
-  resource :checkout, only: %i[new create]
+  resource :checkout, only: %i[new create], controller: "checkout"
   get "checkout/:public_id" => "checkout#show", as: :checkout_confirmation
 
   namespace :voice do

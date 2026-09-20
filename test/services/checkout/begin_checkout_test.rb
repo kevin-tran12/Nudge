@@ -118,7 +118,8 @@ module Checkout
       original = Net::HTTP.method(:start)
       Net::HTTP.define_singleton_method(:start) { |*| raise "BeginCheckout attempted a live HTTP call" }
 
-      service.call(shopping_session: session)
+      result = service.call(shopping_session: session)
+      assert result.redirect_url.present?
     ensure
       Net::HTTP.define_singleton_method(:start, original) if original
     end
