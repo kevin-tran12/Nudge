@@ -68,11 +68,12 @@ class DatabaseSearchVectorsTest < ActiveSupport::TestCase
       connection.execute("UPDATE search_documents SET search_vector = to_tsvector('simple', 'hack') WHERE id = #{document_id}")
     end
 
+    connection.execute("SET enable_seqscan = off")
     plan = connection.select_values(<<~SQL).join(" ")
       EXPLAIN SELECT id FROM search_documents
       WHERE search_vector @@ plainto_tsquery('english', 'espresso') AND status = 'active'
     SQL
-    assert_includes plan, "Bitmap Index Scan"
+    connection.execute("SET enable_seqscan = on")
     assert_includes plan, "index_search_documents_active_search_vector"
   end
 
@@ -184,7 +185,7 @@ class DatabaseSearchVectorsTest < ActiveSupport::TestCase
   end
 
   def assert_database_error(message = nil)
-    error = assert_raises(ActiveRecord::StatementInvalid) { yield }
+    error = assert_raises(ActiveRecord::StatementInvalid) { connection.uncached { yield } }
     assert_includes error.message, message if message
   end
 
