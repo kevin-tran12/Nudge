@@ -247,9 +247,14 @@
   // leave catalog browsing and navigation working: VoiceLauncher degrades to
   // the error state and its text fallback when ElevenLabsAdapter is
   // undefined.
-  var WIDGET_SCRIPT_SRC =
-    (typeof window !== "undefined" && window.__voiceWidgetScriptSrcOverride) ||
-    "https://unpkg.com/@elevenlabs/convai-widget-embed";
+  function widgetScriptSrc() {
+    // Test-only seam: a fixed source never reads live overrides, so this is
+    // read fresh on every call rather than cached at module init.
+    if (typeof window !== "undefined" && window.__voiceWidgetScriptSrcOverride) {
+      return window.__voiceWidgetScriptSrcOverride;
+    }
+    return "https://unpkg.com/@elevenlabs/convai-widget-embed";
+  }
 
   // Client tools the voice agent may invoke. Arguments are forwarded to
   // Rails as an opaque pass-through; the client neither validates nor
@@ -303,7 +308,7 @@
     }
     return new Promise(function (resolve, reject) {
       var script = document.createElement("script");
-      script.src = WIDGET_SCRIPT_SRC;
+      script.src = widgetScriptSrc();
       script.async = true;
       script.onload = function () {
         resolve();

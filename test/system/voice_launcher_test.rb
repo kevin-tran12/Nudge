@@ -27,7 +27,7 @@ class VoiceLauncherTest < ApplicationSystemTestCase
 
     click_button "Agree & start"
     assert_selector "[data-voice-launcher][data-voice-state='connected']", wait: 5
-    assert_selector "elevenlabs-convai"
+    assert_selector "elevenlabs-convai", visible: :all
     assert_equal 1, voice_requests.count { |request| request.fetch("url") == "/voice/session" }
 
     call_result = page.evaluate_async_script(<<~JAVASCRIPT)
@@ -43,7 +43,13 @@ class VoiceLauncherTest < ApplicationSystemTestCase
     tool_request = voice_requests.find { |request| request.fetch("url") == "/voice/tools/search_products" }
     assert tool_request, "expected a forwarded tool call"
     assert_equal "Bearer voice-conversation-token", tool_request.fetch("authorization")
-    assert tool_request.fetch("csrf").present?
+    expected_csrf = page.evaluate_script(<<~JAVASCRIPT)
+      (function () {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return (meta ? meta.getAttribute("content") : null) || "";
+      })();
+    JAVASCRIPT
+    assert_equal expected_csrf, tool_request.fetch("csrf")
     assert_equal({ "query" => "bins" }, tool_request.fetch("body"))
   end
 
@@ -55,14 +61,17 @@ class VoiceLauncherTest < ApplicationSystemTestCase
     click_button "Agree & start"
     assert_selector "[data-voice-launcher][data-voice-state='connected']", wait: 5
 
-    call_result = page.evaluate_async_script(<<~JAVASCRIPT)
-      var callback = arguments[0];
+    page.execute_script(<<~JAVASCRIPT)
+      var launcher = document.querySelector("[data-voice-launcher]");
       var element = document.querySelector("elevenlabs-convai");
       element.dispatchEvent(new CustomEvent("elevenlabs-convai:call", { detail: { config: {} } }));
       window.__voiceLastCallConfig.clientTools.get_product_details({ id: "1" }).then(function (result) {
-        callback(result);
+        launcher.setAttribute("data-voice-debug-tool-result", JSON.stringify(result));
       });
     JAVASCRIPT
+
+    assert_selector "[data-voice-launcher][data-voice-debug-tool-result]", wait: 5
+    call_result = JSON.parse(find("[data-voice-launcher]", visible: :all)["data-voice-debug-tool-result"])
 
     assert_equal({ "error" => "invalid_arguments" }, call_result)
     assert_selector "[data-voice-launcher][data-voice-state='connected']"
@@ -111,7 +120,7 @@ class VoiceLauncherTest < ApplicationSystemTestCase
 
   test "a failed provider script load degrades to the error state" do
     visit products_path
-    stub_voice_network(session: successful_session_response)
+    stub_voice_network(session: successful_session_response, define_widget_element: false)
     page.execute_script("window.__voiceWidgetScriptSrcOverride = '/voice-widget-that-does-not-exist.js'")
 
     click_button "Start voice shopping"
@@ -128,7 +137,7 @@ class VoiceLauncherTest < ApplicationSystemTestCase
     click_button "Start voice shopping"
     click_button "Agree & start"
     assert_selector "[data-voice-launcher][data-voice-state='connected']", wait: 5
-    assert_selector "[data-voice-widget-mount] elevenlabs-convai", count: 1
+    assert_selector "[data-voice-widget-mount] elevenlabs-convai", count: 1, visible: :all
 
     page.execute_script(<<~JAVASCRIPT)
       document.querySelector("elevenlabs-convai").dispatchEvent(new CustomEvent("elevenlabs-convai:disconnect"))
@@ -137,7 +146,7 @@ class VoiceLauncherTest < ApplicationSystemTestCase
 
     click_button "Try voice again"
     assert_selector "[data-voice-launcher][data-voice-state='connected']", wait: 5
-    assert_selector "[data-voice-widget-mount] elevenlabs-convai", count: 1
+    assert_selector "[data-voice-widget-mount] elevenlabs-convai", count: 1, visible: :all
     assert_equal 2, voice_requests.count { |request| request.fetch("url") == "/voice/session" }
   end
 
@@ -149,17 +158,30 @@ class VoiceLauncherTest < ApplicationSystemTestCase
     # Stubs window.fetch for the voice endpoints so tests make zero live
     # network calls, and pre-registers the "elevenlabs-convai" custom element
     # so the provider widget script itself is never requested.
-    def stub_voice_network(session: nil, session_status: 200, session_error: nil, tool_status: 200, tool_error: nil)
+    def stub_voice_network(session: nil, session_status: 200, session_error: nil, tool_status: 200, tool_error: nil, define_widget_element: true)
       session_body = session || { error: session_error }
+      define_widget_element_js = define_widget_element
       page.execute_script(<<~JAVASCRIPT)
         (function () {
           window.__voiceRequests = [];
-          if (!window.customElements.get("elevenlabs-convai")) {
+          if (!navigator.mediaDevices) {
+            Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true, writable: true });
+          }
+          if (!navigator.mediaDevices.getUserMedia) {
+            navigator.mediaDevices.getUserMedia = function () {
+              return Promise.resolve({ getTracks: function () { return []; } });
+            };
+          }
+          if (#{define_widget_element_js} && !window.customElements.get("elevenlabs-convai")) {
             window.customElements.define("elevenlabs-convai", class extends HTMLElement {
               connectedCallback() {
                 this.addEventListener("elevenlabs-convai:call", (event) => {
                   window.__voiceLastCallConfig = event.detail.config;
                 });
+                var element = this;
+                setTimeout(function () {
+                  element.dispatchEvent(new CustomEvent("elevenlabs-convai:call", { detail: { config: {} } }));
+                }, 0);
               }
             });
           }
@@ -204,6 +226,9 @@ class VoiceLauncherTest < ApplicationSystemTestCase
 
     def deny_microphone_access
       page.execute_script(<<~JAVASCRIPT)
+        if (!navigator.mediaDevices) {
+          Object.defineProperty(navigator, "mediaDevices", { value: {}, configurable: true, writable: true });
+        }
         navigator.mediaDevices.getUserMedia = function () {
           return Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
         };
