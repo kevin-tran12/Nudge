@@ -1,0 +1,47 @@
+<section
+  data-voice-launcher
+  data-voice-state="idle"
+  aria-labelledby="voice-launcher-heading"
+  class="min-w-0 rounded-card border border-line bg-surface p-5 shadow-card sm:p-6"
+>
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div class="min-w-0">
+      <h2 id="voice-launcher-heading" class="font-display text-xl font-bold text-ink">Shop by voice</h2>
+      <p class="mt-1 max-w-prose text-sm leading-6 text-muted">
+        Talk to Nudge instead of typing. Voice audio is processed by ElevenLabs, our voice provider.
+      </p>
+    </div>
+
+    <%= render "shared/button", label: "Start voice shopping", variant: :primary, data: { "voice-action": "start" } %>
+  </div>
+
+  <div data-voice-disclosure hidden class="mt-5 min-w-0 rounded-xl border border-line bg-canvas p-4">
+    <p class="text-sm leading-6 text-ink">Voice audio is processed by ElevenLabs, our voice provider.</p>
+    <div class="mt-4 flex flex-wrap gap-3">
+      <%= render "shared/button", label: "Agree & start", variant: :primary, data: { "voice-action": "agree" } %>
+      <%= render "shared/button", label: "Not now", variant: :secondary, data: { "voice-action": "cancel" } %>
+    </div>
+  </div>
+
+  <div
+    data-voice-status
+    role="status"
+    aria-live="polite"
+    aria-atomic="true"
+    aria-busy="false"
+    hidden
+    class="mt-4 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-muted"
+  ></div>
+
+  <div data-voice-fallback hidden class="mt-4 min-w-0 rounded-xl border border-line bg-canvas p-4">
+    <p class="text-sm leading-6 text-ink">
+      Voice isn't available right now. You can keep browsing and searching the catalog without it.
+    </p>
+    <div class="mt-3 flex flex-wrap gap-3">
+      <%= render "shared/button", label: "Continue browsing", variant: :secondary, data: { "voice-action": "dismiss-fallback" } %>
+      <%= render "shared/button", label: "Try voice again", variant: :quiet, data: { "voice-action": "retry" } %>
+    </div>
+  </div>
+
+  <div data-voice-widget-mount class="mt-4 min-w-0"></div>
+</section>
