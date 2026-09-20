@@ -25,6 +25,145 @@ COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access met
 
 
 --
+-- Name: db04_encryption_context_immutable(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.db04_encryption_context_immutable() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  IF NEW.encryption_context IS DISTINCT FROM OLD.encryption_context
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='encryption_context_immutable'; END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: db04_fact_definition_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.db04_fact_definition_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  IF TG_OP='UPDATE' AND (NEW.id,NEW.key,NEW.data_type,NEW.unit_dimension,NEW.canonical_unit,NEW.allowed_operators,
+      NEW.allowed_operators_schema_version,NEW.allowed_values_schema,NEW.allowed_values_schema_version,
+      NEW.hard_eligibility_supported,NEW.version,NEW.created_at) IS DISTINCT FROM
+     (OLD.id,OLD.key,OLD.data_type,OLD.unit_dimension,OLD.canonical_unit,OLD.allowed_operators,
+      OLD.allowed_operators_schema_version,OLD.allowed_values_schema,OLD.allowed_values_schema_version,
+      OLD.hard_eligibility_supported,OLD.version,OLD.created_at)
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_interpretation_immutable'; END IF;
+  IF pg_catalog.jsonb_typeof(NEW.allowed_operators)<>'array'
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_operators_invalid'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements(NEW.allowed_operators) e WHERE pg_catalog.jsonb_typeof(e)<>'string' OR nullif(pg_catalog.btrim(e#>>'{}'),'') IS NULL) OR
+     (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_operators)) <>
+     (SELECT pg_catalog.count(DISTINCT x) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_operators) x)
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_operators_invalid'; END IF;
+  IF NEW.data_type='enum' THEN
+    IF pg_catalog.jsonb_typeof(NEW.allowed_values_schema)<>'object' OR NOT (NEW.allowed_values_schema ? 'enum') OR
+       (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_object_keys(NEW.allowed_values_schema))<>1 OR
+       pg_catalog.jsonb_typeof(NEW.allowed_values_schema->'enum')<>'array' OR pg_catalog.jsonb_array_length(NEW.allowed_values_schema->'enum')=0
+    THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_enum_invalid'; END IF;
+    IF EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements(NEW.allowed_values_schema->'enum') e WHERE pg_catalog.jsonb_typeof(e)<>'string' OR pg_catalog.octet_length(e#>>'{}') > 1024) OR
+       (SELECT pg_catalog.count(*) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_values_schema->'enum')) <>
+       (SELECT pg_catalog.count(DISTINCT x) FROM pg_catalog.jsonb_array_elements_text(NEW.allowed_values_schema->'enum') x)
+    THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='fact_definition_enum_invalid'; END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: db04_latest_observation_validate(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.db04_latest_observation_validate() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE o record; expected_kind text; expected_external text;
+BEGIN
+  IF NEW.latest_observation_id IS NULL THEN RETURN NEW; END IF;
+  IF TG_TABLE_NAME='supplier_products' THEN expected_kind:='product'; expected_external:=NEW.external_product_id;
+  ELSE expected_kind:='variant'; expected_external:=NEW.external_variant_id; END IF;
+  SELECT resource_kind,external_resource_id INTO o FROM public.supplier_observations
+    WHERE id=NEW.latest_observation_id AND supplier_id=NEW.supplier_id FOR KEY SHARE;
+  IF NOT FOUND OR o.resource_kind<>expected_kind OR o.external_resource_id<>expected_external
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='latest_observation_identity_mismatch'; END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: db04_product_fact_validate(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.db04_product_fact_validate() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE d public.fact_definitions%ROWTYPE; valid_enum boolean;
+BEGIN
+  SELECT * INTO d FROM public.fact_definitions WHERE id=NEW.fact_definition_id FOR KEY SHARE;
+  IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE='23503', MESSAGE='product_fact_definition_missing'; END IF;
+  IF (d.data_type='boolean' AND NEW.boolean_value IS NULL) OR
+     (d.data_type='integer' AND NEW.integer_value IS NULL) OR
+     (d.data_type IN ('decimal','measurement') AND NEW.decimal_value IS NULL) OR
+     (d.data_type IN ('text','enum') AND NEW.text_value IS NULL) OR
+     (d.data_type='json' AND NEW.json_value IS NULL)
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='product_fact_definition_mismatch'; END IF;
+  IF d.data_type='measurement' AND NEW.canonical_unit IS DISTINCT FROM d.canonical_unit
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='product_fact_unit_mismatch'; END IF;
+  IF d.data_type<>'measurement' AND NEW.canonical_unit IS NOT NULL
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='product_fact_unit_mismatch'; END IF;
+  IF d.data_type='enum' THEN
+    SELECT EXISTS (SELECT 1 FROM pg_catalog.jsonb_array_elements_text(d.allowed_values_schema->'enum') x WHERE x=NEW.text_value) INTO valid_enum;
+    IF NOT valid_enum THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='product_fact_enum_mismatch'; END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
+-- Name: db04_supplier_observation_guard(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.db04_supplier_observation_guard() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_delete_denied'; END IF;
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.purged_at IS NOT NULL THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purged_at_managed'; END IF;
+    RETURN NEW;
+  END IF;
+  IF (NEW.id,NEW.supplier_id,NEW.resource_kind,NEW.external_resource_id,NEW.provider_request_id,NEW.endpoint_key,
+      NEW.adapter_version,NEW.payload_schema_version,NEW.payload_sha256,NEW.observed_at,NEW.received_at,NEW.created_at,
+      NEW.encryption_context) IS DISTINCT FROM
+     (OLD.id,OLD.supplier_id,OLD.resource_kind,OLD.external_resource_id,OLD.provider_request_id,OLD.endpoint_key,
+      OLD.adapter_version,OLD.payload_schema_version,OLD.payload_sha256,OLD.observed_at,OLD.received_at,OLD.created_at,
+      OLD.encryption_context)
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_immutable'; END IF;
+  IF NEW.purge_after > OLD.purge_after THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_deadline_extension_denied'; END IF;
+  IF NEW.purged_at IS DISTINCT FROM OLD.purged_at
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purged_at_managed'; END IF;
+  IF OLD.purged_at IS NOT NULL AND (NEW.purged_at IS DISTINCT FROM OLD.purged_at OR NEW.payload_ciphertext IS NOT NULL OR NEW.payload_json IS NOT NULL)
+  THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_restore_denied'; END IF;
+  IF OLD.purged_at IS NULL AND NEW.payload_ciphertext IS NULL AND NEW.payload_json IS NULL THEN
+    IF pg_catalog.statement_timestamp() < NEW.purge_after
+    THEN RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_purge_too_early'; END IF;
+    NEW.purged_at := pg_catalog.statement_timestamp();
+  ELSIF OLD.payload_json IS DISTINCT FROM NEW.payload_json THEN
+    RAISE EXCEPTION USING ERRCODE='23514', MESSAGE='supplier_observation_json_replacement_denied';
+  END IF;
+  RETURN NEW;
+END $$;
+
+
+--
 -- Name: nudge_prevent_execution_mode_change(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -173,6 +312,58 @@ CREATE TABLE public.ar_internal_metadata (
 
 
 --
+-- Name: catalog_media; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.catalog_media (
+    id bigint NOT NULL,
+    product_id bigint,
+    product_variant_id bigint,
+    supplier_observation_id bigint,
+    kind text NOT NULL,
+    original_url_ciphertext text,
+    encryption_context uuid DEFAULT gen_random_uuid() NOT NULL,
+    sanitized_url text,
+    object_key text,
+    mime_type text,
+    width integer,
+    height integer,
+    checksum bytea,
+    "position" integer DEFAULT 0 NOT NULL,
+    status text NOT NULL,
+    observed_at timestamp(6) with time zone,
+    verified_at timestamp(6) with time zone,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT catalog_media_checksum_check CHECK (((checksum IS NULL) OR (octet_length(checksum) = 32))),
+    CONSTRAINT catalog_media_height_check CHECK (((height IS NULL) OR (height >= 0))),
+    CONSTRAINT catalog_media_kind_check CHECK ((kind = ANY (ARRAY['image'::text, 'video'::text]))),
+    CONSTRAINT catalog_media_position_check CHECK (("position" >= 0)),
+    CONSTRAINT catalog_media_subject_check CHECK ((num_nonnulls(product_id, product_variant_id) = 1)),
+    CONSTRAINT catalog_media_width_check CHECK (((width IS NULL) OR (width >= 0)))
+);
+
+
+--
+-- Name: catalog_media_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.catalog_media_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: catalog_media_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.catalog_media_id_seq OWNED BY public.catalog_media.id;
+
+
+--
 -- Name: categories; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -301,6 +492,137 @@ ALTER SEQUENCE public.external_identities_id_seq OWNED BY public.external_identi
 
 
 --
+-- Name: fact_definitions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.fact_definitions (
+    id bigint NOT NULL,
+    key text NOT NULL,
+    label text NOT NULL,
+    description text,
+    data_type text NOT NULL,
+    unit_dimension text,
+    canonical_unit text,
+    allowed_operators jsonb NOT NULL,
+    allowed_operators_schema_version smallint NOT NULL,
+    allowed_values_schema jsonb,
+    allowed_values_schema_version smallint,
+    hard_eligibility_supported boolean DEFAULT false NOT NULL,
+    version integer NOT NULL,
+    status text NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT fact_definitions_allowed_values_pair_check CHECK ((((data_type = 'enum'::text) AND (allowed_values_schema IS NOT NULL) AND (allowed_values_schema_version IS NOT NULL) AND (allowed_values_schema_version > 0)) OR ((data_type <> 'enum'::text) AND (allowed_values_schema IS NULL) AND (allowed_values_schema_version IS NULL)))),
+    CONSTRAINT fact_definitions_measurement_check CHECK ((((data_type = 'measurement'::text) AND (NULLIF(btrim(unit_dimension), ''::text) IS NOT NULL) AND (NULLIF(btrim(canonical_unit), ''::text) IS NOT NULL)) OR ((data_type <> 'measurement'::text) AND (unit_dimension IS NULL) AND (canonical_unit IS NULL)))),
+    CONSTRAINT fact_definitions_type_check CHECK ((data_type = ANY (ARRAY['boolean'::text, 'integer'::text, 'decimal'::text, 'text'::text, 'enum'::text, 'measurement'::text, 'json'::text]))),
+    CONSTRAINT fact_definitions_versions_check CHECK (((allowed_operators_schema_version > 0) AND (version > 0)))
+);
+
+
+--
+-- Name: fact_definitions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.fact_definitions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: fact_definitions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.fact_definitions_id_seq OWNED BY public.fact_definitions.id;
+
+
+--
+-- Name: inventory_observations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inventory_observations (
+    id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    supplier_variant_id bigint NOT NULL,
+    supplier_warehouse_id bigint NOT NULL,
+    supplier_observation_id bigint NOT NULL,
+    total_quantity bigint,
+    cj_quantity bigint,
+    factory_quantity bigint,
+    verification_state text,
+    observed_at timestamp(6) with time zone NOT NULL,
+    valid_until timestamp(6) with time zone,
+    created_at timestamp(6) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT inventory_observations_quantities_check CHECK ((((total_quantity IS NULL) OR (total_quantity >= 0)) AND ((cj_quantity IS NULL) OR (cj_quantity >= 0)) AND ((factory_quantity IS NULL) OR (factory_quantity >= 0)))),
+    CONSTRAINT inventory_observations_quantity_present_check CHECK ((num_nonnulls(total_quantity, cj_quantity, factory_quantity) >= 1)),
+    CONSTRAINT inventory_observations_validity_check CHECK (((valid_until IS NULL) OR (valid_until >= observed_at)))
+);
+
+
+--
+-- Name: inventory_observations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.inventory_observations_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: inventory_observations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.inventory_observations_id_seq OWNED BY public.inventory_observations.id;
+
+
+--
+-- Name: price_observations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.price_observations (
+    id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    supplier_variant_id bigint NOT NULL,
+    supplier_observation_id bigint NOT NULL,
+    amount_minor bigint NOT NULL,
+    currency character(3) NOT NULL,
+    price_kind text NOT NULL,
+    quantity_tier integer,
+    observed_at timestamp(6) with time zone NOT NULL,
+    valid_until timestamp(6) with time zone,
+    created_at timestamp(6) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT price_observations_amount_check CHECK ((amount_minor >= 0)),
+    CONSTRAINT price_observations_currency_check CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT price_observations_tier_check CHECK (((quantity_tier IS NULL) OR (quantity_tier > 0))),
+    CONSTRAINT price_observations_validity_check CHECK (((valid_until IS NULL) OR (valid_until >= observed_at)))
+);
+
+
+--
+-- Name: price_observations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.price_observations_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: price_observations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.price_observations_id_seq OWNED BY public.price_observations.id;
+
+
+--
 -- Name: product_categories; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -331,6 +653,68 @@ CREATE SEQUENCE public.product_categories_id_seq
 --
 
 ALTER SEQUENCE public.product_categories_id_seq OWNED BY public.product_categories.id;
+
+
+--
+-- Name: product_facts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_facts (
+    id bigint NOT NULL,
+    product_id bigint,
+    product_variant_id bigint,
+    fact_definition_id bigint NOT NULL,
+    boolean_value boolean,
+    integer_value bigint,
+    decimal_value numeric(20,6),
+    text_value text,
+    "json_value" jsonb,
+    value_schema_version smallint,
+    canonical_unit text,
+    source_kind text NOT NULL,
+    supplier_observation_id bigint,
+    confidence numeric(8,6),
+    inference_version text,
+    observed_at timestamp(6) with time zone NOT NULL,
+    valid_from timestamp(6) with time zone,
+    valid_until timestamp(6) with time zone,
+    status text NOT NULL,
+    supersedes_product_fact_id bigint,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT product_facts_confidence_check CHECK (((confidence IS NULL) OR ((confidence <> ALL (ARRAY['NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric])) AND ((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))))),
+    CONSTRAINT product_facts_decimal_finite_check CHECK (((decimal_value IS NULL) OR (decimal_value <> ALL (ARRAY['NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric])))),
+    CONSTRAINT product_facts_evidence_check CHECK (((source_kind = 'manual'::text) OR (supplier_observation_id IS NOT NULL))),
+    CONSTRAINT product_facts_inference_check CHECK ((((source_kind = 'inferred'::text) AND (NULLIF(btrim(inference_version), ''::text) IS NOT NULL) AND (confidence IS NOT NULL)) OR ((source_kind <> 'inferred'::text) AND (inference_version IS NULL)))),
+    CONSTRAINT product_facts_json_check CHECK ((("json_value" IS NULL) OR ((jsonb_typeof("json_value") = ANY (ARRAY['object'::text, 'array'::text])) AND (value_schema_version IS NOT NULL) AND (value_schema_version > 0)))),
+    CONSTRAINT product_facts_not_self_superseding_check CHECK (((supersedes_product_fact_id IS NULL) OR (supersedes_product_fact_id <> id))),
+    CONSTRAINT product_facts_source_check CHECK ((source_kind = ANY (ARRAY['supplier'::text, 'normalized'::text, 'inferred'::text, 'manual'::text]))),
+    CONSTRAINT product_facts_status_check CHECK ((status = ANY (ARRAY['active'::text, 'superseded'::text, 'rejected'::text]))),
+    CONSTRAINT product_facts_subject_check CHECK ((num_nonnulls(product_id, product_variant_id) = 1)),
+    CONSTRAINT product_facts_text_bound_check CHECK (((text_value IS NULL) OR (octet_length(text_value) <= 1024))),
+    CONSTRAINT product_facts_validity_check CHECK (((valid_until IS NULL) OR (valid_from IS NULL) OR (valid_until >= valid_from))),
+    CONSTRAINT product_facts_value_check CHECK ((num_nonnulls(boolean_value, integer_value, decimal_value, text_value, "json_value") = 1)),
+    CONSTRAINT product_facts_value_version_check CHECK ((("json_value" IS NOT NULL) OR (value_schema_version IS NULL)))
+);
+
+
+--
+-- Name: product_facts_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.product_facts_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: product_facts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.product_facts_id_seq OWNED BY public.product_facts.id;
 
 
 --
@@ -481,6 +865,59 @@ ALTER SEQUENCE public.shopping_sessions_id_seq OWNED BY public.shopping_sessions
 
 
 --
+-- Name: supplier_observations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.supplier_observations (
+    id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    resource_kind text NOT NULL,
+    external_resource_id text NOT NULL,
+    provider_request_id text,
+    endpoint_key text NOT NULL,
+    adapter_version text NOT NULL,
+    payload_schema_version smallint NOT NULL,
+    payload_ciphertext text,
+    payload_json jsonb,
+    payload_sha256 bytea NOT NULL,
+    encryption_context uuid DEFAULT gen_random_uuid() NOT NULL,
+    observed_at timestamp(6) with time zone NOT NULL,
+    received_at timestamp(6) with time zone NOT NULL,
+    normalization_status text DEFAULT 'pending'::text NOT NULL,
+    normalization_error_code text,
+    purge_after timestamp(6) with time zone NOT NULL,
+    purged_at timestamp(6) with time zone,
+    created_at timestamp(6) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT supplier_observations_hash_check CHECK ((octet_length(payload_sha256) = 32)),
+    CONSTRAINT supplier_observations_normalization_error_check CHECK (((normalization_status = 'failed'::text) = (normalization_error_code IS NOT NULL))),
+    CONSTRAINT supplier_observations_normalization_status_check CHECK ((normalization_status = ANY (ARRAY['pending'::text, 'normalized'::text, 'failed'::text]))),
+    CONSTRAINT supplier_observations_payload_lifecycle_check CHECK ((((purged_at IS NULL) AND (num_nonnulls(payload_ciphertext, payload_json) = 1)) OR ((purged_at IS NOT NULL) AND (payload_ciphertext IS NULL) AND (payload_json IS NULL) AND (purged_at >= purge_after)))),
+    CONSTRAINT supplier_observations_payload_object_check CHECK (((payload_json IS NULL) OR (jsonb_typeof(payload_json) = 'object'::text))),
+    CONSTRAINT supplier_observations_payload_version_check CHECK ((payload_schema_version > 0)),
+    CONSTRAINT supplier_observations_purge_deadline_check CHECK ((purge_after >= received_at))
+);
+
+
+--
+-- Name: supplier_observations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.supplier_observations_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: supplier_observations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.supplier_observations_id_seq OWNED BY public.supplier_observations.id;
+
+
+--
 -- Name: supplier_products; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -521,6 +958,55 @@ CREATE SEQUENCE public.supplier_products_id_seq
 --
 
 ALTER SEQUENCE public.supplier_products_id_seq OWNED BY public.supplier_products.id;
+
+
+--
+-- Name: supplier_subscriptions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.supplier_subscriptions (
+    id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    supplier_product_id bigint NOT NULL,
+    topic text NOT NULL,
+    external_ref_ciphertext text,
+    external_ref_digest bytea,
+    digest_key_version smallint,
+    encryption_context uuid DEFAULT gen_random_uuid() NOT NULL,
+    status text DEFAULT 'requested'::text NOT NULL,
+    requested_at timestamp(6) with time zone NOT NULL,
+    confirmed_at timestamp(6) with time zone,
+    last_verified_at timestamp(6) with time zone,
+    closed_at timestamp(6) with time zone,
+    close_reason text,
+    retry_count integer DEFAULT 0 NOT NULL,
+    next_retry_at timestamp(6) with time zone,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT supplier_subscriptions_digest_check CHECK (((external_ref_digest IS NULL) OR (octet_length(external_ref_digest) = 32))),
+    CONSTRAINT supplier_subscriptions_digest_version_check CHECK (((digest_key_version IS NULL) OR (digest_key_version > 0))),
+    CONSTRAINT supplier_subscriptions_external_ref_pair_check CHECK ((num_nonnulls(external_ref_ciphertext, external_ref_digest, digest_key_version) = ANY (ARRAY[0, 3]))),
+    CONSTRAINT supplier_subscriptions_retry_count_check CHECK ((retry_count >= 0))
+);
+
+
+--
+-- Name: supplier_subscriptions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.supplier_subscriptions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: supplier_subscriptions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.supplier_subscriptions_id_seq OWNED BY public.supplier_subscriptions.id;
 
 
 --
@@ -653,6 +1139,96 @@ ALTER SEQUENCE public.suppliers_id_seq OWNED BY public.suppliers.id;
 
 
 --
+-- Name: sync_checkpoints; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sync_checkpoints (
+    id bigint NOT NULL,
+    sync_run_id bigint NOT NULL,
+    checkpoint_key text NOT NULL,
+    cursor text,
+    page_number integer,
+    state_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    state_schema_version smallint NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT sync_checkpoints_page_check CHECK (((page_number IS NULL) OR (page_number > 0))),
+    CONSTRAINT sync_checkpoints_state_check CHECK (((jsonb_typeof(state_json) = 'object'::text) AND (state_schema_version > 0)))
+);
+
+
+--
+-- Name: sync_checkpoints_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.sync_checkpoints_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: sync_checkpoints_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.sync_checkpoints_id_seq OWNED BY public.sync_checkpoints.id;
+
+
+--
+-- Name: sync_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sync_runs (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    supplier_id bigint NOT NULL,
+    mode text NOT NULL,
+    resource_kind text NOT NULL,
+    scope_key text NOT NULL,
+    scope_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    scope_schema_version smallint NOT NULL,
+    adapter_version text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    points_consumed bigint DEFAULT 0 NOT NULL,
+    seen_count bigint DEFAULT 0 NOT NULL,
+    created_count bigint DEFAULT 0 NOT NULL,
+    updated_count bigint DEFAULT 0 NOT NULL,
+    error_count bigint DEFAULT 0 NOT NULL,
+    started_at timestamp(6) with time zone,
+    completed_at timestamp(6) with time zone,
+    error_code text,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT sync_runs_completion_check CHECK (((completed_at IS NULL) OR ((started_at IS NOT NULL) AND (completed_at >= started_at)))),
+    CONSTRAINT sync_runs_counts_check CHECK (((points_consumed >= 0) AND (seen_count >= 0) AND (created_count >= 0) AND (updated_count >= 0) AND (error_count >= 0))),
+    CONSTRAINT sync_runs_mode_check CHECK ((mode = ANY (ARRAY['fixture'::text, 'verify'::text, 'record'::text, 'live'::text]))),
+    CONSTRAINT sync_runs_scope_check CHECK (((jsonb_typeof(scope_json) = 'object'::text) AND (scope_schema_version > 0))),
+    CONSTRAINT sync_runs_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text])))
+);
+
+
+--
+-- Name: sync_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.sync_runs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: sync_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.sync_runs_id_seq OWNED BY public.sync_runs.id;
+
+
+--
 -- Name: turnstile_verifications; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -759,6 +1335,13 @@ ALTER TABLE ONLY public.ai_access_grants ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
+-- Name: catalog_media id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_media ALTER COLUMN id SET DEFAULT nextval('public.catalog_media_id_seq'::regclass);
+
+
+--
 -- Name: categories id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -780,10 +1363,38 @@ ALTER TABLE ONLY public.external_identities ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
+-- Name: fact_definitions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fact_definitions ALTER COLUMN id SET DEFAULT nextval('public.fact_definitions_id_seq'::regclass);
+
+
+--
+-- Name: inventory_observations id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_observations ALTER COLUMN id SET DEFAULT nextval('public.inventory_observations_id_seq'::regclass);
+
+
+--
+-- Name: price_observations id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_observations ALTER COLUMN id SET DEFAULT nextval('public.price_observations_id_seq'::regclass);
+
+
+--
 -- Name: product_categories id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.product_categories ALTER COLUMN id SET DEFAULT nextval('public.product_categories_id_seq'::regclass);
+
+
+--
+-- Name: product_facts id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_facts ALTER COLUMN id SET DEFAULT nextval('public.product_facts_id_seq'::regclass);
 
 
 --
@@ -808,10 +1419,24 @@ ALTER TABLE ONLY public.shopping_sessions ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
+-- Name: supplier_observations id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_observations ALTER COLUMN id SET DEFAULT nextval('public.supplier_observations_id_seq'::regclass);
+
+
+--
 -- Name: supplier_products id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.supplier_products ALTER COLUMN id SET DEFAULT nextval('public.supplier_products_id_seq'::regclass);
+
+
+--
+-- Name: supplier_subscriptions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_subscriptions ALTER COLUMN id SET DEFAULT nextval('public.supplier_subscriptions_id_seq'::regclass);
 
 
 --
@@ -833,6 +1458,20 @@ ALTER TABLE ONLY public.supplier_warehouses ALTER COLUMN id SET DEFAULT nextval(
 --
 
 ALTER TABLE ONLY public.suppliers ALTER COLUMN id SET DEFAULT nextval('public.suppliers_id_seq'::regclass);
+
+
+--
+-- Name: sync_checkpoints id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sync_checkpoints ALTER COLUMN id SET DEFAULT nextval('public.sync_checkpoints_id_seq'::regclass);
+
+
+--
+-- Name: sync_runs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sync_runs ALTER COLUMN id SET DEFAULT nextval('public.sync_runs_id_seq'::regclass);
 
 
 --
@@ -874,6 +1513,14 @@ ALTER TABLE ONLY public.ar_internal_metadata
 
 
 --
+-- Name: catalog_media catalog_media_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_media
+    ADD CONSTRAINT catalog_media_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: categories categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -898,11 +1545,43 @@ ALTER TABLE ONLY public.external_identities
 
 
 --
+-- Name: fact_definitions fact_definitions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.fact_definitions
+    ADD CONSTRAINT fact_definitions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inventory_observations inventory_observations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_observations
+    ADD CONSTRAINT inventory_observations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: price_observations price_observations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_observations
+    ADD CONSTRAINT price_observations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: product_categories product_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.product_categories
     ADD CONSTRAINT product_categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: product_facts product_facts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_facts
+    ADD CONSTRAINT product_facts_pkey PRIMARY KEY (id);
 
 
 --
@@ -938,11 +1617,27 @@ ALTER TABLE ONLY public.shopping_sessions
 
 
 --
+-- Name: supplier_observations supplier_observations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_observations
+    ADD CONSTRAINT supplier_observations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: supplier_products supplier_products_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.supplier_products
     ADD CONSTRAINT supplier_products_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: supplier_subscriptions supplier_subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_subscriptions
+    ADD CONSTRAINT supplier_subscriptions_pkey PRIMARY KEY (id);
 
 
 --
@@ -967,6 +1662,22 @@ ALTER TABLE ONLY public.supplier_warehouses
 
 ALTER TABLE ONLY public.suppliers
     ADD CONSTRAINT suppliers_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: sync_checkpoints sync_checkpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sync_checkpoints
+    ADD CONSTRAINT sync_checkpoints_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: sync_runs sync_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sync_runs
+    ADD CONSTRAINT sync_runs_pkey PRIMARY KEY (id);
 
 
 --
@@ -997,6 +1708,48 @@ CREATE INDEX idx_on_ai_access_grant_id_shopping_session_id_9e8d55f505 ON public.
 --
 
 CREATE UNIQUE INDEX idx_on_supplier_id_external_warehouse_id_735098a127 ON public.supplier_warehouses USING btree (supplier_id, external_warehouse_id);
+
+
+--
+-- Name: idx_on_supplier_observation_id_supplier_id_3a12b0d8ae; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_on_supplier_observation_id_supplier_id_3a12b0d8ae ON public.inventory_observations USING btree (supplier_observation_id, supplier_id);
+
+
+--
+-- Name: idx_on_supplier_observation_id_supplier_id_8c925d892e; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_on_supplier_observation_id_supplier_id_8c925d892e ON public.price_observations USING btree (supplier_observation_id, supplier_id);
+
+
+--
+-- Name: idx_on_supplier_product_id_supplier_id_ed992adacc; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_on_supplier_product_id_supplier_id_ed992adacc ON public.supplier_subscriptions USING btree (supplier_product_id, supplier_id);
+
+
+--
+-- Name: idx_on_supplier_variant_id_supplier_id_32402e41dd; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_on_supplier_variant_id_supplier_id_32402e41dd ON public.inventory_observations USING btree (supplier_variant_id, supplier_id);
+
+
+--
+-- Name: idx_on_supplier_variant_id_supplier_id_415dc3ccfc; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_on_supplier_variant_id_supplier_id_415dc3ccfc ON public.price_observations USING btree (supplier_variant_id, supplier_id);
+
+
+--
+-- Name: idx_on_supplier_warehouse_id_supplier_id_03cdf1d29b; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_on_supplier_warehouse_id_supplier_id_03cdf1d29b ON public.inventory_observations USING btree (supplier_warehouse_id, supplier_id);
 
 
 --
@@ -1060,6 +1813,34 @@ CREATE UNIQUE INDEX index_ai_access_grants_on_public_id ON public.ai_access_gran
 --
 
 CREATE UNIQUE INDEX index_ai_access_grants_on_turnstile_verification_id ON public.ai_access_grants USING btree (turnstile_verification_id) WHERE (turnstile_verification_id IS NOT NULL);
+
+
+--
+-- Name: index_catalog_media_on_encryption_context; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_catalog_media_on_encryption_context ON public.catalog_media USING btree (encryption_context);
+
+
+--
+-- Name: index_catalog_media_on_supplier_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_catalog_media_on_supplier_observation_id ON public.catalog_media USING btree (supplier_observation_id);
+
+
+--
+-- Name: index_catalog_media_product_position; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_catalog_media_product_position ON public.catalog_media USING btree (product_id, "position", id) WHERE (product_id IS NOT NULL);
+
+
+--
+-- Name: index_catalog_media_variant_position; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_catalog_media_variant_position ON public.catalog_media USING btree (product_variant_id, "position", id) WHERE (product_variant_id IS NOT NULL);
 
 
 --
@@ -1140,6 +1921,48 @@ CREATE INDEX index_external_identities_on_user_id ON public.external_identities 
 
 
 --
+-- Name: index_fact_definitions_on_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_fact_definitions_on_key ON public.fact_definitions USING btree (key);
+
+
+--
+-- Name: index_inventory_observations_current; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_inventory_observations_current ON public.inventory_observations USING btree (supplier_variant_id, supplier_warehouse_id, observed_at DESC, id DESC);
+
+
+--
+-- Name: index_inventory_observations_on_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_inventory_observations_on_supplier_id ON public.inventory_observations USING btree (supplier_id);
+
+
+--
+-- Name: index_inventory_observations_unique_source; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_inventory_observations_unique_source ON public.inventory_observations USING btree (supplier_variant_id, supplier_warehouse_id, supplier_observation_id);
+
+
+--
+-- Name: index_price_observations_current; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_price_observations_current ON public.price_observations USING btree (supplier_variant_id, price_kind, currency, observed_at DESC, id DESC);
+
+
+--
+-- Name: index_price_observations_on_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_price_observations_on_supplier_id ON public.price_observations USING btree (supplier_id);
+
+
+--
 -- Name: index_product_categories_on_category_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1151,6 +1974,69 @@ CREATE INDEX index_product_categories_on_category_id ON public.product_categorie
 --
 
 CREATE UNIQUE INDEX index_product_categories_on_product_id_and_category_id ON public.product_categories USING btree (product_id, category_id);
+
+
+--
+-- Name: index_product_facts_active_boolean; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_active_boolean ON public.product_facts USING btree (fact_definition_id, boolean_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (boolean_value IS NOT NULL));
+
+
+--
+-- Name: index_product_facts_active_decimal; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_active_decimal ON public.product_facts USING btree (fact_definition_id, decimal_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (decimal_value IS NOT NULL));
+
+
+--
+-- Name: index_product_facts_active_integer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_active_integer ON public.product_facts USING btree (fact_definition_id, integer_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (integer_value IS NOT NULL));
+
+
+--
+-- Name: index_product_facts_active_text; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_active_text ON public.product_facts USING btree (fact_definition_id, text_value, product_id, product_variant_id) WHERE ((status = 'active'::text) AND (text_value IS NOT NULL));
+
+
+--
+-- Name: index_product_facts_on_fact_definition_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_on_fact_definition_id ON public.product_facts USING btree (fact_definition_id);
+
+
+--
+-- Name: index_product_facts_on_product_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_on_product_id ON public.product_facts USING btree (product_id);
+
+
+--
+-- Name: index_product_facts_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_on_product_variant_id ON public.product_facts USING btree (product_variant_id);
+
+
+--
+-- Name: index_product_facts_on_supersedes_product_fact_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_on_supersedes_product_fact_id ON public.product_facts USING btree (supersedes_product_fact_id);
+
+
+--
+-- Name: index_product_facts_on_supplier_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_facts_on_supplier_observation_id ON public.product_facts USING btree (supplier_observation_id);
 
 
 --
@@ -1217,6 +2103,41 @@ CREATE INDEX index_shopping_sessions_on_user_id_and_status ON public.shopping_se
 
 
 --
+-- Name: index_supplier_observations_normalization_queue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_observations_normalization_queue ON public.supplier_observations USING btree (normalization_status, received_at, id) WHERE ((purged_at IS NULL) AND (normalization_status = ANY (ARRAY['pending'::text, 'failed'::text])));
+
+
+--
+-- Name: index_supplier_observations_on_encryption_context; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_observations_on_encryption_context ON public.supplier_observations USING btree (encryption_context);
+
+
+--
+-- Name: index_supplier_observations_on_id_and_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_observations_on_id_and_supplier_id ON public.supplier_observations USING btree (id, supplier_id);
+
+
+--
+-- Name: index_supplier_observations_purge_queue; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_observations_purge_queue ON public.supplier_observations USING btree (purge_after, id) WHERE (purged_at IS NULL);
+
+
+--
+-- Name: index_supplier_observations_resource_chronology; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_observations_resource_chronology ON public.supplier_observations USING btree (supplier_id, resource_kind, external_resource_id, observed_at DESC, id DESC);
+
+
+--
 -- Name: index_supplier_products_on_id_and_supplier_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1249,6 +2170,41 @@ CREATE UNIQUE INDEX index_supplier_products_on_supplier_id_and_external_product_
 --
 
 CREATE UNIQUE INDEX index_supplier_products_on_supplier_id_and_product_id ON public.supplier_products USING btree (supplier_id, product_id);
+
+
+--
+-- Name: index_supplier_subscriptions_logical; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_subscriptions_logical ON public.supplier_subscriptions USING btree (supplier_id, supplier_product_id, topic);
+
+
+--
+-- Name: index_supplier_subscriptions_on_encryption_context; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_subscriptions_on_encryption_context ON public.supplier_subscriptions USING btree (encryption_context);
+
+
+--
+-- Name: index_supplier_subscriptions_provider_ref; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_subscriptions_provider_ref ON public.supplier_subscriptions USING btree (supplier_id, topic, digest_key_version, external_ref_digest) WHERE (external_ref_digest IS NOT NULL);
+
+
+--
+-- Name: index_supplier_subscriptions_retry; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_subscriptions_retry ON public.supplier_subscriptions USING btree (next_retry_at, id) WHERE ((next_retry_at IS NOT NULL) AND (closed_at IS NULL));
+
+
+--
+-- Name: index_supplier_variants_on_id_and_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_variants_on_id_and_supplier_id ON public.supplier_variants USING btree (id, supplier_id);
 
 
 --
@@ -1287,10 +2243,38 @@ CREATE INDEX index_supplier_variants_on_supplier_product_id_and_supplier_id ON p
 
 
 --
+-- Name: index_supplier_warehouses_on_id_and_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_warehouses_on_id_and_supplier_id ON public.supplier_warehouses USING btree (id, supplier_id);
+
+
+--
 -- Name: index_suppliers_on_key; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX index_suppliers_on_key ON public.suppliers USING btree (key);
+
+
+--
+-- Name: index_sync_checkpoints_on_sync_run_id_and_checkpoint_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_sync_checkpoints_on_sync_run_id_and_checkpoint_key ON public.sync_checkpoints USING btree (sync_run_id, checkpoint_key);
+
+
+--
+-- Name: index_sync_runs_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_sync_runs_on_public_id ON public.sync_runs USING btree (public_id);
+
+
+--
+-- Name: index_sync_runs_scope_chronology; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_sync_runs_scope_chronology ON public.sync_runs USING btree (supplier_id, resource_kind, scope_key, created_at DESC, id DESC);
 
 
 --
@@ -1336,6 +2320,69 @@ CREATE UNIQUE INDEX index_users_on_public_id ON public.users USING btree (public
 
 
 --
+-- Name: catalog_media db04_catalog_media_encryption_context; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_catalog_media_encryption_context BEFORE UPDATE OF encryption_context ON public.catalog_media FOR EACH ROW EXECUTE FUNCTION public.db04_encryption_context_immutable();
+
+
+--
+-- Name: fact_definitions db04_fact_definition_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_fact_definition_guard BEFORE INSERT OR UPDATE ON public.fact_definitions FOR EACH ROW EXECUTE FUNCTION public.db04_fact_definition_guard();
+
+
+--
+-- Name: inventory_observations db04_inventory_observations_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_inventory_observations_immutable BEFORE DELETE OR UPDATE ON public.inventory_observations FOR EACH ROW EXECUTE FUNCTION public.nudge_prevent_row_mutation();
+
+
+--
+-- Name: price_observations db04_price_observations_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_price_observations_immutable BEFORE DELETE OR UPDATE ON public.price_observations FOR EACH ROW EXECUTE FUNCTION public.nudge_prevent_row_mutation();
+
+
+--
+-- Name: product_facts db04_product_fact_validate; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_product_fact_validate BEFORE INSERT OR UPDATE ON public.product_facts FOR EACH ROW EXECUTE FUNCTION public.db04_product_fact_validate();
+
+
+--
+-- Name: supplier_observations db04_supplier_observation_guard; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_supplier_observation_guard BEFORE INSERT OR DELETE OR UPDATE ON public.supplier_observations FOR EACH ROW EXECUTE FUNCTION public.db04_supplier_observation_guard();
+
+
+--
+-- Name: supplier_products db04_supplier_products_latest_observation; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_supplier_products_latest_observation BEFORE INSERT OR UPDATE OF latest_observation_id, supplier_id, external_product_id ON public.supplier_products FOR EACH ROW EXECUTE FUNCTION public.db04_latest_observation_validate();
+
+
+--
+-- Name: supplier_subscriptions db04_supplier_subscriptions_encryption_context; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_supplier_subscriptions_encryption_context BEFORE UPDATE OF encryption_context ON public.supplier_subscriptions FOR EACH ROW EXECUTE FUNCTION public.db04_encryption_context_immutable();
+
+
+--
+-- Name: supplier_variants db04_supplier_variants_latest_observation; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER db04_supplier_variants_latest_observation BEFORE INSERT OR UPDATE OF latest_observation_id, supplier_id, external_variant_id ON public.supplier_variants FOR EACH ROW EXECUTE FUNCTION public.db04_latest_observation_validate();
+
+
+--
 -- Name: ai_access_grants fk_ai_grants_consent_session; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1349,6 +2396,62 @@ ALTER TABLE ONLY public.ai_access_grants
 
 ALTER TABLE ONLY public.ai_access_grants
     ADD CONSTRAINT fk_ai_grants_turnstile_session FOREIGN KEY (turnstile_verification_id, shopping_session_id) REFERENCES public.turnstile_verifications(id, shopping_session_id) ON DELETE SET NULL (turnstile_verification_id);
+
+
+--
+-- Name: inventory_observations fk_inventory_observations_source_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_observations
+    ADD CONSTRAINT fk_inventory_observations_source_supplier FOREIGN KEY (supplier_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: inventory_observations fk_inventory_observations_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_observations
+    ADD CONSTRAINT fk_inventory_observations_supplier FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: inventory_observations fk_inventory_observations_variant_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_observations
+    ADD CONSTRAINT fk_inventory_observations_variant_supplier FOREIGN KEY (supplier_variant_id, supplier_id) REFERENCES public.supplier_variants(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: inventory_observations fk_inventory_observations_warehouse_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inventory_observations
+    ADD CONSTRAINT fk_inventory_observations_warehouse_supplier FOREIGN KEY (supplier_warehouse_id, supplier_id) REFERENCES public.supplier_warehouses(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: price_observations fk_price_observations_source_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_observations
+    ADD CONSTRAINT fk_price_observations_source_supplier FOREIGN KEY (supplier_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: price_observations fk_price_observations_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_observations
+    ADD CONSTRAINT fk_price_observations_supplier FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: price_observations fk_price_observations_variant_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.price_observations
+    ADD CONSTRAINT fk_price_observations_variant_supplier FOREIGN KEY (supplier_variant_id, supplier_id) REFERENCES public.supplier_variants(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 
 --
@@ -1376,11 +2479,27 @@ ALTER TABLE ONLY public.product_categories
 
 
 --
+-- Name: product_facts fk_rails_0cbcdb0a9b; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_facts
+    ADD CONSTRAINT fk_rails_0cbcdb0a9b FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE CASCADE;
+
+
+--
 -- Name: ai_access_grants fk_rails_0fc168a9d6; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.ai_access_grants
     ADD CONSTRAINT fk_rails_0fc168a9d6 FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: product_facts fk_rails_1590454801; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_facts
+    ADD CONSTRAINT fk_rails_1590454801 FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
 
 
 --
@@ -1397,6 +2516,22 @@ ALTER TABLE ONLY public.consent_records
 
 ALTER TABLE ONLY public.consent_records
     ADD CONSTRAINT fk_rails_282f08b4f7 FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: catalog_media fk_rails_33b2a8131c; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_media
+    ADD CONSTRAINT fk_rails_33b2a8131c FOREIGN KEY (supplier_observation_id) REFERENCES public.supplier_observations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: sync_checkpoints fk_rails_41cc8be07d; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sync_checkpoints
+    ADD CONSTRAINT fk_rails_41cc8be07d FOREIGN KEY (sync_run_id) REFERENCES public.sync_runs(id) ON DELETE CASCADE;
 
 
 --
@@ -1424,6 +2559,14 @@ ALTER TABLE ONLY public.supplier_variants
 
 
 --
+-- Name: product_facts fk_rails_79715916d6; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_facts
+    ADD CONSTRAINT fk_rails_79715916d6 FOREIGN KEY (fact_definition_id) REFERENCES public.fact_definitions(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: categories fk_rails_82f48f7407; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1448,6 +2591,14 @@ ALTER TABLE ONLY public.product_categories
 
 
 --
+-- Name: product_facts fk_rails_9971d96166; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_facts
+    ADD CONSTRAINT fk_rails_9971d96166 FOREIGN KEY (supplier_observation_id) REFERENCES public.supplier_observations(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: supplier_products fk_rails_9a363579c5; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1456,11 +2607,35 @@ ALTER TABLE ONLY public.supplier_products
 
 
 --
+-- Name: catalog_media fk_rails_a3f4d7937d; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_media
+    ADD CONSTRAINT fk_rails_a3f4d7937d FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: supplier_observations fk_rails_af15bf8fed; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_observations
+    ADD CONSTRAINT fk_rails_af15bf8fed FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: supplier_warehouses fk_rails_b6502f29ac; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.supplier_warehouses
     ADD CONSTRAINT fk_rails_b6502f29ac FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: sync_runs fk_rails_b65808c902; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sync_runs
+    ADD CONSTRAINT fk_rails_b65808c902 FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
 
 
 --
@@ -1496,6 +2671,54 @@ ALTER TABLE ONLY public.turnstile_verifications
 
 
 --
+-- Name: product_facts fk_rails_f20e5ac3e9; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_facts
+    ADD CONSTRAINT fk_rails_f20e5ac3e9 FOREIGN KEY (supersedes_product_fact_id) REFERENCES public.product_facts(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: catalog_media fk_rails_f30bd63329; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_media
+    ADD CONSTRAINT fk_rails_f30bd63329 FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+
+
+--
+-- Name: supplier_products fk_supplier_products_latest_observation; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_products
+    ADD CONSTRAINT fk_supplier_products_latest_observation FOREIGN KEY (latest_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: supplier_subscriptions fk_supplier_subscriptions_product_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_subscriptions
+    ADD CONSTRAINT fk_supplier_subscriptions_product_supplier FOREIGN KEY (supplier_product_id, supplier_id) REFERENCES public.supplier_products(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: supplier_subscriptions fk_supplier_subscriptions_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_subscriptions
+    ADD CONSTRAINT fk_supplier_subscriptions_supplier FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
+-- Name: supplier_variants fk_supplier_variants_latest_observation; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_variants
+    ADD CONSTRAINT fk_supplier_variants_latest_observation FOREIGN KEY (latest_observation_id, supplier_id) REFERENCES public.supplier_observations(id, supplier_id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+
+--
 -- Name: supplier_variants fk_supplier_variants_product_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1510,6 +2733,7 @@ ALTER TABLE ONLY public.supplier_variants
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260920000004'),
 ('20260920000003'),
 ('20260920000002'),
 ('20260920000001');

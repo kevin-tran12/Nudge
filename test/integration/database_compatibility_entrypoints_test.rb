@@ -8,6 +8,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
   MIGRATION_VERSIONS = Rails.root.glob("db/migrate/*.rb").map { |path| path.basename.to_s.split("_").first }.freeze
   IDENTITY_MIGRATION_VERSION = "20260920000002"
   CATALOG_MIGRATION_VERSION = "20260920000003"
+  CATALOG_EVIDENCE_MIGRATION_VERSION = "20260920000004"
   IDENTITY_TABLES = %w[
     agent_provider_sessions
     ai_access_grants
@@ -27,11 +28,75 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     categories
     suppliers
   ].freeze
+  CATALOG_EVIDENCE_TABLES = %w[
+    supplier_observations catalog_media fact_definitions product_facts
+    price_observations inventory_observations sync_runs sync_checkpoints
+    supplier_subscriptions
+  ].freeze
+
+  test "catalog evidence migration rolls back cleanly and survives redo and structure load" do
+    with_database do |database, connection|
+      Tempfile.create([ "db04-rollback", ".sql" ]) do |structure|
+        assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+        assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}", schema: structure.path)
+
+        CATALOG_EVIDENCE_TABLES.each do |table|
+          assert_nil connection.exec_params("SELECT to_regclass($1)", [ "public.#{table}" ]).getvalue(0, 0), table
+        end
+        %w[supplier_products supplier_variants supplier_warehouses].each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+        assert_equal %w[latest_observation_id], connection.exec(<<~SQL).map { |row| row.fetch("column_name") }.uniq
+          SELECT column_name FROM information_schema.columns
+          WHERE table_schema='public' AND table_name IN ('supplier_products','supplier_variants')
+            AND column_name='latest_observation_id'
+        SQL
+
+        assert_command_succeeds run_rails(database, "db:migrate:redo", "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}", schema: structure.path)
+        CATALOG_EVIDENCE_TABLES.each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+        assert_equal "2", connection.exec(<<~SQL).getvalue(0, 0)
+          SELECT count(*) FROM pg_constraint
+          WHERE conname IN ('fk_supplier_products_latest_observation','fk_supplier_variants_latest_observation')
+            AND convalidated
+        SQL
+        assert_db04_schema_version_guards connection
+
+        assert_command_succeeds run_rails(database, "db:schema:dump", schema: structure.path)
+        dumped = File.read(structure.path)
+        assert_includes dumped, Nudge::DatabaseCompatibility::PGVECTOR_STRUCTURE_STATEMENT
+        assert_includes dumped, "db04_supplier_observation_guard"
+        assert_includes dumped, "fk_supplier_products_latest_observation"
+
+        with_database do |load_database, load_connection|
+          assert_command_succeeds run_rails(load_database, "db:schema:load", schema: structure.path)
+          CATALOG_EVIDENCE_TABLES.each do |table|
+            assert_equal table, load_connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+          end
+          assert_equal "0.8.5", load_connection.exec("SELECT extversion FROM pg_extension WHERE extname='vector'").getvalue(0, 0)
+          assert_equal "2", load_connection.exec(<<~SQL).getvalue(0, 0)
+            SELECT count(*) FROM pg_proc
+            WHERE proname IN ('db04_supplier_observation_guard','db04_product_fact_validate')
+              AND prosecdef = false
+              AND proconfig = ARRAY['search_path=pg_catalog']
+          SQL
+          assert_db04_schema_version_guards load_connection
+        end
+      end
+    end
+  end
 
   test "catalog migration rolls back completely and preserves its constraints through redo and schema load" do
     with_database do |database, connection|
       Tempfile.create([ "db03-rollback", ".sql" ]) do |structure|
         assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}",
+          schema: structure.path
+        )
 
         assert_command_succeeds run_rails(
           database,
@@ -53,6 +118,12 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           database,
           "db:migrate:redo",
           "VERSION=#{CATALOG_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:up",
+          "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}",
           schema: structure.path
         )
         CATALOG_TABLES.each do |table|
@@ -207,6 +278,49 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
   end
 
   private
+
+  def assert_db04_schema_version_guards(connection)
+    [ "NULL", "0" ].each_with_index do |version, index|
+      assert_raises(PG::CheckViolation) do
+        connection.exec(<<~SQL)
+          INSERT INTO fact_definitions
+            (key,label,data_type,allowed_operators,allowed_operators_schema_version,allowed_values_schema,
+             allowed_values_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+          VALUES ('invalid-enum-#{index}','Enum','enum','[]',1,'{"enum":[""]}',#{version},false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        SQL
+      end
+    end
+    connection.exec(<<~SQL)
+      INSERT INTO fact_definitions
+        (key,label,data_type,allowed_operators,allowed_operators_schema_version,allowed_values_schema,
+         allowed_values_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+      VALUES ('valid-enum','Enum','enum','[]',1,'{"enum":[""]}',1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    SQL
+
+    product_id = connection.exec(<<~SQL).getvalue(0, 0)
+      INSERT INTO products (status,title,description,lock_version,created_at,updated_at)
+      VALUES ('draft','Version guard','',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id
+    SQL
+    definition_id = connection.exec(<<~SQL).getvalue(0, 0)
+      INSERT INTO fact_definitions
+        (key,label,data_type,allowed_operators,allowed_operators_schema_version,hard_eligibility_supported,version,status,created_at,updated_at)
+      VALUES ('json-guard','JSON','json','[]',1,false,1,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id
+    SQL
+    [ "NULL", "0" ].each do |version|
+      assert_raises(PG::CheckViolation) do
+        connection.exec(<<~SQL)
+          INSERT INTO product_facts
+            (product_id,fact_definition_id,json_value,value_schema_version,source_kind,observed_at,status,created_at,updated_at)
+          VALUES (#{product_id},#{definition_id},'{}',#{version},'manual',CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        SQL
+      end
+    end
+    connection.exec(<<~SQL)
+      INSERT INTO product_facts
+        (product_id,fact_definition_id,json_value,value_schema_version,source_kind,observed_at,status,created_at,updated_at)
+      VALUES (#{product_id},#{definition_id},'{}',1,'manual',CURRENT_TIMESTAMP,'active',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    SQL
+  end
 
   def assert_measurement_nan_guards(connection)
     %w[
