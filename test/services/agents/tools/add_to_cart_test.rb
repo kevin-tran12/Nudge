@@ -5,6 +5,7 @@ class Agents::Tools::AddToCartTest < ActiveSupport::TestCase
   include TestSupport::CatalogRecords
 
   setup do
+    travel_to TestSupport::IdentityRecords::REFERENCE_TIME
     clear_identity_records
     clear_catalog_records
     create_cj_supplier
@@ -14,6 +15,7 @@ class Agents::Tools::AddToCartTest < ActiveSupport::TestCase
   teardown do
     clear_catalog_records
     clear_identity_records
+    travel_back
   end
 
   test "adds the requested quantity of a known variant to the caller's own cart" do
