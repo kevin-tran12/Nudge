@@ -1,0 +1,14 @@
+<%
+  tone_classes = {
+    success: "border-brand-200 bg-brand-50 text-brand-800",
+    warning: "border-accent-100 bg-accent-50 text-accent-700",
+    danger: "border-danger-200 bg-danger-50 text-danger-700"
+  }
+  live_role = tone == :danger ? "alert" : "status"
+  live_priority = tone == :danger ? "assertive" : "polite"
+%>
+
+<section role="<%= live_role %>" aria-live="<%= live_priority %>" aria-atomic="true" class="rounded-card border p-4 <%= tone_classes.fetch(tone, tone_classes[:success]) %>">
+  <h2 class="font-bold"><%= title %></h2>
+  <p class="mt-1 text-sm leading-6"><%= message %></p>
+</section>

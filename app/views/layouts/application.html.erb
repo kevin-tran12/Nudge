@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title><%= content_for(:title) || "Nudge" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -22,7 +22,46 @@
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
   </head>
 
-  <body>
-    <%= yield %>
+  <body class="min-h-screen bg-canvas font-sans text-ink antialiased">
+    <a href="#main-content" class="fixed left-4 top-4 z-50 -translate-y-24 rounded-full bg-ink px-5 py-3 font-semibold text-white shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200 motion-reduce:transition-none">
+      Skip to content
+    </a>
+
+    <div class="flex min-h-screen flex-col">
+      <header class="border-b border-line/80 bg-canvas/95">
+        <div class="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
+          <%= link_to root_path, class: "inline-flex min-h-11 items-center gap-3 rounded-full px-2 font-display text-xl font-bold tracking-tight text-ink focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200" do %>
+            <span class="grid size-9 place-items-center rounded-full bg-brand-700 text-sm font-bold text-white" aria-hidden="true">N</span>
+            <span>Nudge</span>
+          <% end %>
+
+          <nav aria-label="Primary navigation">
+            <ul class="flex flex-wrap items-center gap-1 text-sm font-semibold text-muted">
+              <li><%= link_to "Home", root_path, aria: { current: "page" }, class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200" %></li>
+              <li><%= link_to "How it works", "#how-it-works", class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200" %></li>
+            </ul>
+          </nav>
+        </div>
+      </header>
+
+      <% if flash.any? %>
+        <div class="mx-auto w-full max-w-7xl space-y-3 px-4 pt-4 sm:px-6 lg:px-8">
+          <% flash.each do |type, message| %>
+            <%= render "shared/notice", title: type.to_s.humanize, message: message, tone: type.to_s == "alert" ? :danger : :success %>
+          <% end %>
+        </div>
+      <% end %>
+
+      <main id="main-content" tabindex="-1" class="min-w-0 flex-1 focus:outline-none">
+        <%= yield %>
+      </main>
+
+      <footer class="border-t border-line bg-surface">
+        <div class="mx-auto flex w-full max-w-7xl flex-col gap-2 px-4 py-8 text-sm text-muted sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
+          <p>&copy; <%= Time.current.year %> Nudge</p>
+          <p>Clearer choices for everyday shopping.</p>
+        </div>
+      </footer>
+    </div>
   </body>
 </html>
