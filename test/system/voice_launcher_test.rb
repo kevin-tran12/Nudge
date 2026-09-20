@@ -42,7 +42,10 @@ class VoiceLauncherTest < ApplicationSystemTestCase
     assert_equal({ "ok" => true, "tool" => "search_products" }, call_result)
     tool_request = voice_requests.find { |request| request.fetch("url") == "/voice/tools/search_products" }
     assert tool_request, "expected a forwarded tool call"
-    assert_equal "Bearer voice-conversation-token", tool_request.fetch("authorization")
+    # The tool endpoint authorizes the AI grant, not the provider conversation
+    # token. Sending the latter authenticated nothing and failed every call.
+    assert_equal "Bearer voice-grant-token", tool_request.fetch("authorization")
+    refute_includes tool_request.fetch("authorization"), "voice-conversation-token"
     expected_csrf = page.evaluate_script(<<~JAVASCRIPT)
       (function () {
         var meta = document.querySelector('meta[name="csrf-token"]');
@@ -152,7 +155,12 @@ class VoiceLauncherTest < ApplicationSystemTestCase
 
   private
     def successful_session_response
-      { conversation_token: "voice-conversation-token", agent_id: "agent-123", expires_at: 1.hour.from_now.iso8601 }
+      {
+        conversation_token: "voice-conversation-token",
+        grant_token: "voice-grant-token",
+        agent_id: "agent-123",
+        expires_at: 1.hour.from_now.iso8601
+      }
     end
 
     # Stubs window.fetch for the voice endpoints so tests make zero live
