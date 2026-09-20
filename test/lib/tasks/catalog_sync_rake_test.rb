@@ -25,7 +25,7 @@ class CatalogSyncRakeTest < ActiveSupport::TestCase
   end
 
   test "an unrecognized mode fails closed instead of degrading to record" do
-    _out, err = with_env("CATALOG_SYNC_MODE" => "live") do
+    _out, err = with_env({ "CATALOG_SYNC_MODE" => "live" }) do
       capture_io { assert_raises(SystemExit) { Rake::Task["catalog:sync"].invoke } }
     end
 
@@ -65,7 +65,7 @@ class CatalogSyncRakeTest < ActiveSupport::TestCase
   end
 
   test "an out-of-range product limit fails closed" do
-    _out, err = with_env("CATALOG_SYNC_PRODUCT_LIMIT" => "0") do
+    _out, err = with_env({ "CATALOG_SYNC_PRODUCT_LIMIT" => "0" }) do
       capture_io { assert_raises(SystemExit) { Rake::Task["catalog:sync"].invoke } }
     end
 

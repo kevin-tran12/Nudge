@@ -1,5 +1,7 @@
 require "test_helper"
 require "json"
+require "net/http"
+require "socket"
 
 # CAT-SYNC-01. Every byte in this test comes from a stubbed transport: no
 # socket is ever opened, and the whole capture/validate/import cycle is
@@ -231,12 +233,22 @@ class CatalogSupplierCaptureTest < ActiveSupport::TestCase
         inventory: InventoryObservation.count, prices: PriceObservation.count }
     end
 
-    def refute_socket_opened(&block)
-      guard = ->(*) { flunk "a socket was opened during an offline capture" }
-      TCPSocket.stub(:open, guard) do
-        TCPSocket.stub(:new, guard) do
-          Net::HTTP.stub(:start, guard, &block)
-        end
+    # Replaces every socket entry point the CJ transport could reach with a
+    # raising stub, so the assertion is "no socket was opened", not "the fake
+    # transport was called".
+    def refute_socket_opened
+      targets = [ TCPSocket.singleton_class, TCPSocket.singleton_class, Net::HTTP.singleton_class ].
+        zip(%i[open new start])
+      targets.each do |owner, name|
+        owner.send(:alias_method, :"original_#{name}", name)
+        owner.send(:define_method, name) { |*, **, &_block| raise "a socket was opened during an offline capture" }
+      end
+      yield
+    ensure
+      targets&.each do |owner, name|
+        owner.send(:remove_method, name)
+        owner.send(:alias_method, name, :"original_#{name}")
+        owner.send(:remove_method, :"original_#{name}")
       end
     end
 

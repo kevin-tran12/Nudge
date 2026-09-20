@@ -47,8 +47,13 @@ module Catalog
         @captures = {}
       end
 
+      # Time#iso8601 produces a US-ASCII string while
+      # RecordArtifactValidator requires UTF-8. That timestamp is ours, not
+      # supplier data, so re-tagging it here is a representation fix and not a
+      # trust decision; the response body is left exactly as received.
       def call(operation:, request:, body:, observed_at:)
-        @captures[operation] = { request: request, body: body, observed_at: observed_at }
+        @captures[operation] = { request: request, body: body,
+          observed_at: observed_at.to_s.dup.force_encoding(Encoding::UTF_8) }
         nil
       end
 
