@@ -8,6 +8,8 @@ module Integrations
   module Cj
     class Normalizer
       MAX_BODY_BYTES = 262_144
+      # A single decimal amount. CJ listing rows use "3.49 -- 4.78" for a range.
+      SINGLE_PRICE = /\A\s*\d+(?:\.\d+)?\s*\z/
       MAX_LIST_ITEMS = 200
       # oss-cf.cjdropshipping.com verified against live CJ product detail responses.
       MEDIA_HOSTS = %w[cf.cjdropshipping.com oss-cf.cjdropshipping.com
@@ -125,7 +127,19 @@ module Integrations
           Contracts::ProductSummary.new(external_id: identifier(row["pid"]),
             sku: optional_reference(row["productSku"]), title: plain_text(row["productNameEn"], limit: 200),
             image_url: row["productImage"].nil? ? nil : media_url(row["productImage"]),
-            price: money(row["sellPrice"]))
+            price: summary_price(row["sellPrice"]))
+        end
+
+        # A listing row reports a range like "3.49 -- 4.78" when its variants are
+        # priced differently. A range is not a price, so it is surfaced as unknown
+        # rather than collapsed into one end of it or an invented midpoint. The
+        # authoritative per-variant prices come from the product detail call.
+        def summary_price(value)
+          return nil if value.nil?
+          return money(value) if value.is_a?(Numeric)
+          return nil unless value.is_a?(String) && value.match?(SINGLE_PRICE)
+
+          money(value)
         end
 
         def total_count(value)
