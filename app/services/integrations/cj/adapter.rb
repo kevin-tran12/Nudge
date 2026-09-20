@@ -27,6 +27,10 @@ module Integrations
       # purpose split).
       PURPOSES = { product: :catalog, inventory: :catalog, freight: :critical, product_list: :catalog }.freeze
 
+      # Default record-mode raw-response sink: discards the bytes. Only an
+      # explicitly injected sink from trusted server code ever sees them.
+      NO_RAW_SINK = ->(operation:, request:, body:, observed_at:) { }
+
       MAX_ATTEMPTS = 3
       MAX_RETRY_DELAY = 30.0
       DEFAULT_RETRY_DELAY = 1.0
@@ -44,11 +48,14 @@ module Integrations
       def initialize(mode: :fixture, scenario: :success, deployment: Rails.env, capability: nil,
         config: Rails.application.config.x.cj, points_limit: nil, transport: nil, governor: nil,
         authentication: nil, clock: -> { Time.now.utc }, waiter: ->(seconds) { sleep(seconds) },
-        observer: ->(*) { })
+        observer: ->(*) { }, raw_sink: NO_RAW_SINK)
         policy = ModePolicy.new(deployment: deployment, mode: mode, capability: capability)
+        raise Error.new(:invalid_input), cause: nil unless raw_sink.respond_to?(:call)
+
         @mode = policy.mode
         @clock = clock
         @waiter = waiter
+        @raw_sink = raw_sink
 
         if @mode == :fixture
           @source = FixtureSource.new(scenario: scenario)
@@ -127,7 +134,9 @@ module Integrations
             @governor.admit!(purpose: purpose, points: points)
             token = @authentication.fetch.token
             body = @transport.call(operation: operation, token: token.value, request: request)
-            Normalizer.new.call(operation: operation, body: body, request: request, observed_at: @clock.call.iso8601)
+            observed_at = @clock.call.iso8601
+            capture(operation, request, body, observed_at)
+            Normalizer.new.call(operation: operation, body: body, request: request, observed_at: observed_at)
           rescue Error => error
             raise error unless error.retryable? && attempt < MAX_ATTEMPTS
 
@@ -135,6 +144,20 @@ module Integrations
             attempt += 1
             retry
           end
+        end
+
+        # The only seam through which untouched provider bytes leave this class,
+        # and only in :record mode -- the mode whose entire purpose is producing
+        # a reviewable artifact (AGENTS.md "External API development policy").
+        # Fixture, verify, and live never reach it, so no ordinary development,
+        # CI, verification, or production call can leak a raw body. The sink is
+        # handed the same observed_at the Normalizer stamps on the provenance,
+        # so a captured artifact and its normalized result cannot disagree.
+        def capture(operation, request, body, observed_at)
+          return unless @mode == :record
+
+          @raw_sink.call(operation: operation, request: request, body: body, observed_at: observed_at)
+          nil
         end
 
         def wait_before_retry(error)
