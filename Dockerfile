@@ -15,8 +15,8 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --system --gid 1000 rails && \
     useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash && \
-    mkdir -p log storage tmp app/assets/builds && \
-    chown -R rails:rails /home/rails log storage tmp app/assets/builds
+    mkdir -p log storage tmp app/assets/builds /coverage && \
+    chown -R rails:rails /home/rails log storage tmp app/assets/builds /coverage
 
 FROM base AS build
 

@@ -57,7 +57,14 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          docker compose run --rm --no-deps -e RAILS_ENV=test -e RAILS_TEST_WORKERS app bin/test-all 2>&1 | tee tmp/test-results/coverage.log
+          docker compose run --rm --no-deps -v "$PWD:/rails:ro" -e RAILS_ENV=test -e RAILS_TEST_WORKERS app bin/test-all 2>&1 | tee tmp/test-results/coverage.log
+
+      - name: Export coverage artifact
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p tmp/test-results
+          docker compose run --rm --no-deps app tar -C /coverage -czf - . > tmp/test-results/coverage.tar.gz
 
       - name: Upload test evidence
         if: always()
@@ -65,7 +72,6 @@ jobs:
         with:
           name: test-evidence-${{ github.run_id }}
           path: |
-            coverage/
             tmp/test-results/
           if-no-files-found: warn
           retention-days: 14
@@ -118,8 +124,8 @@ jobs:
       - name: Build production image
         run: docker build --target runtime --tag "$CI_IMAGE" .
 
-      - name: Verify production boot
-        run: docker run --rm -e RAILS_ENV=production -e SECRET_KEY_BASE_DUMMY=1 "$CI_IMAGE" bin/rails runner "Rails.application.eager_load!"
+      - name: Verify production image contract
+        run: docker run --rm -e RAILS_ENV=production -e SECRET_KEY_BASE_DUMMY=1 "$CI_IMAGE" ruby test/runtime/production_image_contract.rb
 
       - name: Scan repository configuration and secrets
         run: docker run --rm -v "$PWD:/workspace" "$TRIVY_IMAGE" fs --scanners secret,misconfig --exit-code 1 --severity HIGH,CRITICAL --skip-dirs .git /workspace

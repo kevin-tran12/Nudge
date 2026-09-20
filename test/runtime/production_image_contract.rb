@@ -1,6 +1,6 @@
 require "open3"
 
-excluded_gems = %w[debug rubocop capybara]
+excluded_gems = %w[debug rubocop capybara simplecov]
 bundle_path = ENV.fetch("BUNDLE_PATH", "/usr/local/bundle")
 installed_paths = excluded_gems.flat_map do |name|
   Dir[File.join(bundle_path, "ruby", "*", "{gems,specifications}", "#{name}-*")]

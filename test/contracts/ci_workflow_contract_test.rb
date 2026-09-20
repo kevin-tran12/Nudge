@@ -21,23 +21,40 @@ class CiWorkflowContractTest < ActiveSupport::TestCase
   end
 
   test "retains required scans and production checks" do
-    %w[
+    required_commands = %w[
       bin/rubocop
       bin/bundler-audit
       bin/brakeman
       secret,misconfig
       --target runtime
-      Rails.application.eager_load!
       --pkg-types os
-    ].each do |required_command|
+    ] + [ "ruby test/runtime/production_image_contract.rb" ]
+
+    required_commands.each do |required_command|
       assert_includes @workflow_source, required_command
     end
+  end
+
+  test "runs the production image contract unconditionally after the image build" do
+    steps = @workflow.dig("jobs", "production-security", "steps")
+    build_index = steps.index { |step| step["name"] == "Build production image" }
+    contract_index = steps.index { |step| step["name"] == "Verify production image contract" }
+
+    assert_equal build_index + 1, contract_index
+    assert_nil steps.fetch(contract_index)["if"]
+  end
+
+  test "runs coverage with read-only source and exports the named volume" do
+    assert_includes @workflow_source, ":/rails:ro"
+    assert_includes @workflow_source, "coverage.tar.gz"
+    assert_includes @workflow_source, "tar -C /coverage"
+    refute_includes @workflow_source, "coverage/\n"
   end
 
   test "publishes test evidence even when a lane fails" do
     assert_includes @workflow_source, "actions/upload-artifact@"
     assert_includes @workflow_source, "if: always()"
-    assert_includes @workflow_source, "coverage/"
+    assert_includes @workflow_source, "coverage.tar.gz"
     assert_includes @workflow_source, "tmp/test-results/"
   end
 

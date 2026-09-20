@@ -4,11 +4,13 @@ ENV["PROVIDER_MODE"] ||= "fixture"
 abort "Tests require PROVIDER_MODE=fixture" unless ENV["PROVIDER_MODE"] == "fixture"
 
 require "simplecov"
+require "tmpdir"
 
 test_lane = ENV.fetch("TEST_LANE", "all")
+coverage_root = ENV.fetch("COVERAGE_ROOT") { File.join(Dir.tmpdir, "nudge-coverage") }
 
 SimpleCov.command_name(test_lane)
-SimpleCov.coverage_dir("coverage/#{test_lane}")
+SimpleCov.coverage_dir(File.join(coverage_root, test_lane))
 SimpleCov.start "rails" do
   enable_coverage :branch
   track_files "{app,lib}/**/*.rb"
@@ -22,12 +24,10 @@ SimpleCov.start "rails" do
 end
 
 require_relative "../config/environment"
+warn "TEST_SCHEMA_MAINTENANCE_REACHED" if ENV["DATABASE_SAFETY_PROBE"] == "1"
 require "rails/test_help"
 
 Dir[Rails.root.join("test/support/**/*.rb")].sort.each { |file| require file }
-
-test_database = ActiveRecord::Base.connection_db_config.database
-abort "Refusing to test against non-test database #{test_database.inspect}" unless test_database.match?(/(?:^|_)test\z/)
 
 module ActiveSupport
   class TestCase

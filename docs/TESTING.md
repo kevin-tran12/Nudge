@@ -31,6 +31,8 @@ docker compose run --rm --no-deps -e RAILS_ENV=test app bin/test-all
 
 The initial gate is 80% line coverage and 60% branch coverage across tracked application and library Ruby files. The three unchanged Rails abstract base classes are excluded because they contain configuration comments and inheritance declarations without application behavior. Remove an exclusion when behavior is added to one of those files. This baseline is enforceable with the foundation code and should rise as domain behavior is added. Partial lanes produce informational coverage without applying the aggregate threshold.
 
+SimpleCov writes to `/coverage` in the dedicated `rails_coverage` named volume. It never needs to create files in the source checkout, so the full coverage lane runs with the checkout mounted read-only. CI exports the volume through a tar stream written by the host runner to `tmp/test-results/coverage.tar.gz`; this keeps artifact ownership with the checkout user and works when the host checkout belongs to root or a UID other than the container's UID 1000.
+
 Tests can call `unique_test_value(prefix)` for a process-safe namespace. Database-backed tests continue to use Rails transactional isolation and should create only the records needed for the assertion.
 
 CI uses one Rails test worker for repeatable coverage and failure output. A developer may set `RAILS_TEST_WORKERS` to exercise process isolation locally; this does not replace the single-worker coverage gate.
@@ -41,17 +43,8 @@ CI uses one Rails test worker for repeatable coverage and failure output. A deve
 
 ## CI evidence and failure behavior
 
-GitHub Actions runs the fast lane, integration/contract lane, and full coverage gate before uploading coverage HTML and plain test logs for 14 days. The shell uses `pipefail`, so logging cannot hide a failing test. Quality and production-security jobs independently gate lint, Ruby dependency audit, Brakeman, repository secret/misconfiguration scanning, production build and eager load, and operating-system container vulnerabilities. No JavaScript import map is installed yet; add an executable JavaScript dependency audit when client-side packages are introduced.
+GitHub Actions runs the fast lane, integration/contract lane, and full coverage gate before uploading the compressed coverage report and plain test logs for 14 days. The shell uses `pipefail`, so logging cannot hide a failing test. Quality and production-security jobs independently gate lint, Ruby dependency audit, Brakeman, repository secret/misconfiguration scanning, the complete production-image contract, and operating-system container vulnerabilities. No JavaScript import map is installed yet; add an executable JavaScript dependency audit when client-side packages are introduced.
 
 To verify failure propagation locally, temporarily select a nonexistent test or add a deliberate failing assertion on a disposable branch; the lane must return nonzero and the workflow must retain the corresponding log. Never commit an intentional failure or bypass a failing command with `continue-on-error`, `|| true`, or a zero-exit wrapper.
 
-## FND-01 integration gate
-
-FND-01 owns `test/runtime/production_image_contract.rb` and the pruned production bundle. After rebasing this branch onto merged FND-01, add the following step immediately after `Build production image` in the `production-security` job:
-
-```yaml
-- name: Verify production image contract
-  run: docker run --rm -e RAILS_ENV=production -e SECRET_KEY_BASE_DUMMY=1 "$CI_IMAGE" ruby test/runtime/production_image_contract.rb
-```
-
-The contract must fail if the runtime contains development/test gems, runs as root, has an incomplete production bundle, or cannot eager-load Rails. Do not make this step conditional or allow it to pass when the contract file is absent.
+The production-image contract runs unconditionally immediately after the runtime build. It fails if the image contains development/test gems (including SimpleCov), runs as root, has an incomplete production bundle, or cannot eager-load Rails.
