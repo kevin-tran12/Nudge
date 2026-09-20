@@ -43,6 +43,14 @@ module Integrations
         def to_json(...)
           as_json.to_json(...)
         end
+
+        def encode_with(*)
+          raise TypeError, "CJ webhook verifier serialization is disabled"
+        end
+
+        def marshal_dump
+          raise TypeError, "CJ webhook verifier serialization is disabled"
+        end
       end
     end
   end

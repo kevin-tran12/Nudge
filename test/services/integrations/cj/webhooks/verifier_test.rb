@@ -1,10 +1,21 @@
 require "test_helper"
 require "base64"
 require "openssl"
+require "yaml"
 
 class CjWebhookVerifierTest < ActiveSupport::TestCase
   OPEN_ID = "synthetic-open-id-for-tests"
   FIXTURE = Rails.root.join("test/fixtures/files/cj/webhooks/v1/product-update.json")
+
+  class SensitiveParser
+    def initialize(secret)
+      @secret = secret
+    end
+
+    def call(raw_body:)
+      raw_body
+    end
+  end
 
   test "verifies the exact raw body and returns a frozen sanitized contract" do
     raw_body = File.binread(FIXTURE)
@@ -53,6 +64,31 @@ class CjWebhookVerifierTest < ActiveSupport::TestCase
       refute_includes value.inspect, OPEN_ID
       assert_equal({ "configured" => true }, value.as_json)
       serialized_forms(value).each { |serialized| refute_includes serialized, OPEN_ID }
+    end
+  end
+
+  test "secret-bearing verifiers refuse direct and nested YAML and Marshal serialization" do
+    key = "synthetic-serialization-key"
+    dependency_secret = "synthetic-dependency-graph-secret"
+    dependency = Integrations::Cj::Webhooks::HmacSignatureVerifier.new(open_id: key)
+    boundary = Integrations::Cj::Webhooks::Verifier.new(
+      signature_verifier: dependency,
+      parser: SensitiveParser.new(dependency_secret)
+    )
+    serializers = {
+      yaml_direct: ->(value) { YAML.dump(value) },
+      yaml_nested: ->(value) { YAML.dump({ "value" => [ value ] }) },
+      marshal_direct: ->(value) { Marshal.dump(value) },
+      marshal_nested: ->(value) { Marshal.dump({ "value" => [ value ] }) }
+    }
+
+    [ dependency, boundary ].each do |value|
+      serializers.each_value do |serialize|
+        error = assert_raises(TypeError) { serialize.call(value) }
+        assert_equal "CJ webhook verifier serialization is disabled", error.message
+        refute_includes error.full_message, key
+        refute_includes error.full_message, dependency_secret
+      end
     end
   end
 
