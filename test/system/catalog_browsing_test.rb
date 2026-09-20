@@ -124,7 +124,7 @@ class CatalogBrowsingTest < ApplicationSystemTestCase
 
     def assert_minimum_target_sizes(viewport)
       targets = page.evaluate_script(<<~JAVASCRIPT)
-        Array.from(document.querySelectorAll("a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex='-1'])"))
+        Array.from(document.querySelectorAll("a[href], button, input:not([type='hidden']), select, textarea, summary, [tabindex]:not([tabindex='-1'])"))
           .filter((element) => !element.disabled && getComputedStyle(element).visibility !== "hidden")
           .map((element) => {
             const rect = element.getBoundingClientRect();

@@ -1,0 +1,27 @@
+<li class="rounded-card border border-line bg-surface p-4 shadow-card sm:p-5">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div class="min-w-0">
+      <h3 class="break-words text-lg font-bold text-ink"><%= line_item.title %></h3>
+      <p data-line-price-state="<%= line_item.price_known ? "known" : "unknown" %>" class="mt-1 text-sm text-muted">
+        <%= cart_line_item_price_label(line_item) %> each
+      </p>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <%= form_with url: cart_item_path(line_item.cart_item_id), method: :patch, class: "flex items-center gap-2" do %>
+        <%= hidden_field_tag :client_mutation_id, SecureRandom.uuid %>
+        <label class="sr-only" for="quantity-<%= line_item.cart_item_id %>">Quantity for <%= line_item.title %></label>
+        <%= number_field_tag :quantity, line_item.quantity, id: "quantity-#{line_item.cart_item_id}", min: 1, step: 1, required: true,
+              class: "min-h-11 w-20 rounded-xl border border-control-border bg-surface px-3 py-2.5 text-ink focus:border-brand-700 focus:outline-none focus:ring-4 focus:ring-focus-ring focus:ring-offset-2" %>
+        <%= render "shared/button", label: "Update", type: "submit", variant: :secondary %>
+      <% end %>
+
+      <%= form_with url: cart_item_path(line_item.cart_item_id), method: :delete do %>
+        <%= hidden_field_tag :client_mutation_id, SecureRandom.uuid %>
+        <%= render "shared/button", label: "Remove", type: "submit", variant: :quiet %>
+      <% end %>
+    </div>
+  </div>
+
+  <p class="mt-4 border-t border-line pt-4 text-right font-bold text-ink"><%= cart_line_item_total_label(line_item) %></p>
+</li>
