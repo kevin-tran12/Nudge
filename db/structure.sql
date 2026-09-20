@@ -421,6 +421,139 @@ CREATE TABLE public.ar_internal_metadata (
 
 
 --
+-- Name: cart_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cart_items (
+    id bigint NOT NULL,
+    cart_id bigint NOT NULL,
+    product_variant_id bigint NOT NULL,
+    quantity integer NOT NULL,
+    last_displayed_unit_amount_minor bigint,
+    currency character(3),
+    price_observation_id bigint,
+    lock_version integer DEFAULT 0 NOT NULL,
+    added_at timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT cart_items_amount_check CHECK (((last_displayed_unit_amount_minor IS NULL) OR (last_displayed_unit_amount_minor >= 0))),
+    CONSTRAINT cart_items_amount_currency_pair_check CHECK (((last_displayed_unit_amount_minor IS NULL) = (currency IS NULL))),
+    CONSTRAINT cart_items_currency_check CHECK (((currency IS NULL) OR (currency ~ '^[A-Z]{3}$'::text))),
+    CONSTRAINT cart_items_lock_version_check CHECK ((lock_version >= 0)),
+    CONSTRAINT cart_items_quantity_check CHECK ((quantity > 0))
+);
+
+
+--
+-- Name: cart_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.cart_items_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: cart_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.cart_items_id_seq OWNED BY public.cart_items.id;
+
+
+--
+-- Name: cart_mutations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cart_mutations (
+    id bigint NOT NULL,
+    cart_id bigint NOT NULL,
+    client_mutation_id uuid NOT NULL,
+    operation text NOT NULL,
+    product_variant_id bigint NOT NULL,
+    requested_quantity integer,
+    quantity_delta integer,
+    request_hash bytea NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    result_snapshot jsonb,
+    result_schema_version smallint,
+    error_code text,
+    started_at timestamp(6) with time zone NOT NULL,
+    completed_at timestamp(6) with time zone,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT cart_mutations_completion_check CHECK (((completed_at IS NULL) OR (completed_at >= started_at))),
+    CONSTRAINT cart_mutations_quantity_exclusive_check CHECK ((NOT ((requested_quantity IS NOT NULL) AND (quantity_delta IS NOT NULL)))),
+    CONSTRAINT cart_mutations_request_hash_check CHECK ((octet_length(request_hash) = 32)),
+    CONSTRAINT cart_mutations_result_pair_check CHECK (((result_snapshot IS NULL) = (result_schema_version IS NULL))),
+    CONSTRAINT cart_mutations_result_version_check CHECK (((result_schema_version IS NULL) OR (result_schema_version > 0)))
+);
+
+
+--
+-- Name: cart_mutations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.cart_mutations_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: cart_mutations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.cart_mutations_id_seq OWNED BY public.cart_mutations.id;
+
+
+--
+-- Name: carts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.carts (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    shopping_session_id bigint NOT NULL,
+    user_id bigint,
+    status text DEFAULT 'active'::text NOT NULL,
+    currency character(3) NOT NULL,
+    lock_version integer DEFAULT 0 NOT NULL,
+    last_activity_at timestamp(6) with time zone NOT NULL,
+    expires_at timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT carts_currency_check CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT carts_expiry_check CHECK ((expires_at >= last_activity_at)),
+    CONSTRAINT carts_lock_version_check CHECK ((lock_version >= 0)),
+    CONSTRAINT carts_status_check CHECK ((status = ANY (ARRAY['active'::text, 'converted'::text, 'abandoned'::text, 'expired'::text])))
+);
+
+
+--
+-- Name: carts_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.carts_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: carts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.carts_id_seq OWNED BY public.carts.id;
+
+
+--
 -- Name: catalog_media; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -510,6 +643,153 @@ CREATE SEQUENCE public.categories_id_seq
 --
 
 ALTER SEQUENCE public.categories_id_seq OWNED BY public.categories.id;
+
+
+--
+-- Name: checkout_intents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checkout_intents (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    execution_mode text NOT NULL,
+    cart_id bigint NOT NULL,
+    provider text NOT NULL,
+    intent_key text NOT NULL,
+    request_hash bytea NOT NULL,
+    status text DEFAULT 'open'::text NOT NULL,
+    blocked_reason text,
+    started_at timestamp(6) with time zone NOT NULL,
+    completed_at timestamp(6) with time zone,
+    expires_at timestamp(6) with time zone NOT NULL,
+    lock_version integer DEFAULT 0 NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT checkout_intents_blocked_reason_check CHECK (((status = 'blocked'::text) = (blocked_reason IS NOT NULL))),
+    CONSTRAINT checkout_intents_completion_check CHECK (((completed_at IS NULL) OR (completed_at >= started_at))),
+    CONSTRAINT checkout_intents_completion_presence_check CHECK (((status = ANY (ARRAY['converted'::text, 'expired'::text, 'cancelled'::text])) = (completed_at IS NOT NULL))),
+    CONSTRAINT checkout_intents_execution_mode_check CHECK ((execution_mode = ANY (ARRAY['fixture'::text, 'sandbox'::text, 'live'::text]))),
+    CONSTRAINT checkout_intents_expiry_check CHECK ((expires_at > started_at)),
+    CONSTRAINT checkout_intents_lock_version_check CHECK ((lock_version >= 0)),
+    CONSTRAINT checkout_intents_request_hash_check CHECK ((octet_length(request_hash) = 32)),
+    CONSTRAINT checkout_intents_status_check CHECK ((status = ANY (ARRAY['open'::text, 'blocked'::text, 'converted'::text, 'expired'::text, 'cancelled'::text])))
+);
+
+
+--
+-- Name: checkout_intents_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.checkout_intents_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: checkout_intents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.checkout_intents_id_seq OWNED BY public.checkout_intents.id;
+
+
+--
+-- Name: checkout_validation_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checkout_validation_items (
+    id bigint NOT NULL,
+    checkout_validation_id bigint NOT NULL,
+    product_variant_id bigint NOT NULL,
+    requested_quantity integer NOT NULL,
+    inventory_result text NOT NULL,
+    supplier_amount_minor bigint,
+    currency character(3),
+    freight_result text NOT NULL,
+    destination_result text NOT NULL,
+    margin_result text NOT NULL,
+    overall_result text NOT NULL,
+    price_observation_id bigint,
+    inventory_observation_id bigint,
+    evidence_observed_at timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT checkout_validation_items_amount_check CHECK (((supplier_amount_minor IS NULL) OR (supplier_amount_minor >= 0))),
+    CONSTRAINT checkout_validation_items_amount_currency_pair_check CHECK (((supplier_amount_minor IS NULL) = (currency IS NULL))),
+    CONSTRAINT checkout_validation_items_currency_check CHECK (((currency IS NULL) OR (currency ~ '^[A-Z]{3}$'::text))),
+    CONSTRAINT checkout_validation_items_destination_result_check CHECK ((destination_result = ANY (ARRAY['pass'::text, 'fail'::text, 'unknown'::text]))),
+    CONSTRAINT checkout_validation_items_freight_result_check CHECK ((freight_result = ANY (ARRAY['pass'::text, 'fail'::text, 'unknown'::text]))),
+    CONSTRAINT checkout_validation_items_inventory_result_check CHECK ((inventory_result = ANY (ARRAY['pass'::text, 'fail'::text, 'unknown'::text]))),
+    CONSTRAINT checkout_validation_items_margin_result_check CHECK ((margin_result = ANY (ARRAY['pass'::text, 'fail'::text, 'unknown'::text]))),
+    CONSTRAINT checkout_validation_items_overall_result_check CHECK ((overall_result = ANY (ARRAY['pass'::text, 'fail'::text, 'unknown'::text]))),
+    CONSTRAINT checkout_validation_items_quantity_check CHECK ((requested_quantity > 0))
+);
+
+
+--
+-- Name: checkout_validation_items_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.checkout_validation_items_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: checkout_validation_items_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.checkout_validation_items_id_seq OWNED BY public.checkout_validation_items.id;
+
+
+--
+-- Name: checkout_validations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checkout_validations (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    cart_id bigint NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    failure_reason text,
+    destination_country character(2) NOT NULL,
+    destination_region text,
+    destination_ciphertext text,
+    started_at timestamp(6) with time zone NOT NULL,
+    completed_at timestamp(6) with time zone,
+    expires_at timestamp(6) with time zone NOT NULL,
+    total_policy_version text NOT NULL,
+    margin_policy_version text NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT checkout_validations_completion_check CHECK (((completed_at IS NULL) OR (completed_at >= started_at))),
+    CONSTRAINT checkout_validations_expiry_check CHECK ((expires_at > started_at)),
+    CONSTRAINT checkout_validations_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'passed'::text, 'failed'::text, 'expired'::text])))
+);
+
+
+--
+-- Name: checkout_validations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.checkout_validations_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: checkout_validations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.checkout_validations_id_seq OWNED BY public.checkout_validations.id;
 
 
 --
@@ -816,6 +1096,60 @@ CREATE SEQUENCE public.fact_definitions_id_seq
 --
 
 ALTER SEQUENCE public.fact_definitions_id_seq OWNED BY public.fact_definitions.id;
+
+
+--
+-- Name: freight_quotes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.freight_quotes (
+    id bigint NOT NULL,
+    checkout_validation_id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    provider_ref_ciphertext text,
+    provider_ref_digest bytea,
+    digest_key_version smallint,
+    warehouse_external_id text NOT NULL,
+    logistics_id text NOT NULL,
+    logistics_name text NOT NULL,
+    amount_minor bigint NOT NULL,
+    currency character(3) NOT NULL,
+    delivery_min_days integer,
+    delivery_max_days integer,
+    supplier_observation_id bigint,
+    quoted_at timestamp(6) with time zone NOT NULL,
+    expires_at timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT freight_quotes_amount_check CHECK ((amount_minor >= 0)),
+    CONSTRAINT freight_quotes_currency_check CHECK ((currency ~ '^[A-Z]{3}$'::text)),
+    CONSTRAINT freight_quotes_delivery_max_check CHECK (((delivery_max_days IS NULL) OR (delivery_max_days >= 0))),
+    CONSTRAINT freight_quotes_delivery_min_check CHECK (((delivery_min_days IS NULL) OR (delivery_min_days >= 0))),
+    CONSTRAINT freight_quotes_delivery_range_check CHECK (((delivery_min_days IS NULL) OR (delivery_max_days IS NULL) OR (delivery_max_days >= delivery_min_days))),
+    CONSTRAINT freight_quotes_digest_key_version_check CHECK (((digest_key_version IS NULL) OR (digest_key_version > 0))),
+    CONSTRAINT freight_quotes_expiry_check CHECK ((expires_at > quoted_at)),
+    CONSTRAINT freight_quotes_provider_ref_digest_length_check CHECK (((provider_ref_digest IS NULL) OR (octet_length(provider_ref_digest) = 32))),
+    CONSTRAINT freight_quotes_provider_ref_pair_check CHECK ((((provider_ref_ciphertext IS NULL) = (provider_ref_digest IS NULL)) AND ((provider_ref_digest IS NULL) = (digest_key_version IS NULL))))
+);
+
+
+--
+-- Name: freight_quotes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.freight_quotes_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: freight_quotes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.freight_quotes_id_seq OWNED BY public.freight_quotes.id;
 
 
 --
@@ -1915,6 +2249,27 @@ ALTER TABLE ONLY public.ai_access_grants ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
+-- Name: cart_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_items ALTER COLUMN id SET DEFAULT nextval('public.cart_items_id_seq'::regclass);
+
+
+--
+-- Name: cart_mutations id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_mutations ALTER COLUMN id SET DEFAULT nextval('public.cart_mutations_id_seq'::regclass);
+
+
+--
+-- Name: carts id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.carts ALTER COLUMN id SET DEFAULT nextval('public.carts_id_seq'::regclass);
+
+
+--
 -- Name: catalog_media id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1926,6 +2281,27 @@ ALTER TABLE ONLY public.catalog_media ALTER COLUMN id SET DEFAULT nextval('publi
 --
 
 ALTER TABLE ONLY public.categories ALTER COLUMN id SET DEFAULT nextval('public.categories_id_seq'::regclass);
+
+
+--
+-- Name: checkout_intents id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_intents ALTER COLUMN id SET DEFAULT nextval('public.checkout_intents_id_seq'::regclass);
+
+
+--
+-- Name: checkout_validation_items id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validation_items ALTER COLUMN id SET DEFAULT nextval('public.checkout_validation_items_id_seq'::regclass);
+
+
+--
+-- Name: checkout_validations id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validations ALTER COLUMN id SET DEFAULT nextval('public.checkout_validations_id_seq'::regclass);
 
 
 --
@@ -1975,6 +2351,13 @@ ALTER TABLE ONLY public.external_identities ALTER COLUMN id SET DEFAULT nextval(
 --
 
 ALTER TABLE ONLY public.fact_definitions ALTER COLUMN id SET DEFAULT nextval('public.fact_definitions_id_seq'::regclass);
+
+
+--
+-- Name: freight_quotes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.freight_quotes ALTER COLUMN id SET DEFAULT nextval('public.freight_quotes_id_seq'::regclass);
 
 
 --
@@ -2179,6 +2562,30 @@ ALTER TABLE ONLY public.ar_internal_metadata
 
 
 --
+-- Name: cart_items cart_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_items
+    ADD CONSTRAINT cart_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: cart_mutations cart_mutations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_mutations
+    ADD CONSTRAINT cart_mutations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: carts carts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.carts
+    ADD CONSTRAINT carts_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: catalog_media catalog_media_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2192,6 +2599,30 @@ ALTER TABLE ONLY public.catalog_media
 
 ALTER TABLE ONLY public.categories
     ADD CONSTRAINT categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: checkout_intents checkout_intents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_intents
+    ADD CONSTRAINT checkout_intents_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: checkout_validation_items checkout_validation_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validation_items
+    ADD CONSTRAINT checkout_validation_items_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: checkout_validations checkout_validations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validations
+    ADD CONSTRAINT checkout_validations_pkey PRIMARY KEY (id);
 
 
 --
@@ -2248,6 +2679,14 @@ ALTER TABLE ONLY public.external_identities
 
 ALTER TABLE ONLY public.fact_definitions
     ADD CONSTRAINT fact_definitions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: freight_quotes freight_quotes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.freight_quotes
+    ADD CONSTRAINT freight_quotes_pkey PRIMARY KEY (id);
 
 
 --
@@ -2632,6 +3071,76 @@ CREATE UNIQUE INDEX index_ai_access_grants_on_turnstile_verification_id ON publi
 
 
 --
+-- Name: index_cart_items_on_cart_and_variant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_cart_items_on_cart_and_variant ON public.cart_items USING btree (cart_id, product_variant_id);
+
+
+--
+-- Name: index_cart_items_on_cart_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_cart_items_on_cart_id ON public.cart_items USING btree (cart_id);
+
+
+--
+-- Name: index_cart_items_on_price_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_cart_items_on_price_observation_id ON public.cart_items USING btree (price_observation_id);
+
+
+--
+-- Name: index_cart_items_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_cart_items_on_product_variant_id ON public.cart_items USING btree (product_variant_id);
+
+
+--
+-- Name: index_cart_mutations_on_cart_and_client_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_cart_mutations_on_cart_and_client_id ON public.cart_mutations USING btree (cart_id, client_mutation_id);
+
+
+--
+-- Name: index_cart_mutations_on_cart_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_cart_mutations_on_cart_id ON public.cart_mutations USING btree (cart_id);
+
+
+--
+-- Name: index_cart_mutations_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_cart_mutations_on_product_variant_id ON public.cart_mutations USING btree (product_variant_id);
+
+
+--
+-- Name: index_carts_on_active_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_carts_on_active_session ON public.carts USING btree (shopping_session_id) WHERE (status = 'active'::text);
+
+
+--
+-- Name: index_carts_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_carts_on_public_id ON public.carts USING btree (public_id);
+
+
+--
+-- Name: index_carts_on_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_carts_on_user_id ON public.carts USING btree (user_id);
+
+
+--
 -- Name: index_catalog_media_on_encryption_context; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2678,6 +3187,83 @@ CREATE INDEX index_categories_on_parent_id ON public.categories USING btree (par
 --
 
 CREATE UNIQUE INDEX index_categories_on_public_id ON public.categories USING btree (public_id);
+
+
+--
+-- Name: index_checkout_intents_on_cart_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_checkout_intents_on_cart_id ON public.checkout_intents USING btree (cart_id);
+
+
+--
+-- Name: index_checkout_intents_on_expiry_open_blocked; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_checkout_intents_on_expiry_open_blocked ON public.checkout_intents USING btree (expires_at) WHERE (status = ANY (ARRAY['open'::text, 'blocked'::text]));
+
+
+--
+-- Name: index_checkout_intents_on_id_and_mode; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_checkout_intents_on_id_and_mode ON public.checkout_intents USING btree (id, execution_mode);
+
+
+--
+-- Name: index_checkout_intents_on_mode_cart_provider_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_checkout_intents_on_mode_cart_provider_key ON public.checkout_intents USING btree (execution_mode, cart_id, provider, intent_key);
+
+
+--
+-- Name: index_checkout_intents_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_checkout_intents_on_public_id ON public.checkout_intents USING btree (public_id);
+
+
+--
+-- Name: index_checkout_validation_items_on_inventory_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_checkout_validation_items_on_inventory_observation_id ON public.checkout_validation_items USING btree (inventory_observation_id);
+
+
+--
+-- Name: index_checkout_validation_items_on_price_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_checkout_validation_items_on_price_observation_id ON public.checkout_validation_items USING btree (price_observation_id);
+
+
+--
+-- Name: index_checkout_validation_items_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_checkout_validation_items_on_product_variant_id ON public.checkout_validation_items USING btree (product_variant_id);
+
+
+--
+-- Name: index_checkout_validation_items_on_validation_and_variant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_checkout_validation_items_on_validation_and_variant ON public.checkout_validation_items USING btree (checkout_validation_id, product_variant_id);
+
+
+--
+-- Name: index_checkout_validations_on_cart_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_checkout_validations_on_cart_id ON public.checkout_validations USING btree (cart_id);
+
+
+--
+-- Name: index_checkout_validations_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_checkout_validations_on_public_id ON public.checkout_validations USING btree (public_id);
 
 
 --
@@ -2825,6 +3411,27 @@ CREATE INDEX index_external_identities_on_user_id ON public.external_identities 
 --
 
 CREATE UNIQUE INDEX index_fact_definitions_on_key ON public.fact_definitions USING btree (key);
+
+
+--
+-- Name: index_freight_quotes_on_checkout_validation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_freight_quotes_on_checkout_validation_id ON public.freight_quotes USING btree (checkout_validation_id);
+
+
+--
+-- Name: index_freight_quotes_on_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_freight_quotes_on_supplier_id ON public.freight_quotes USING btree (supplier_id);
+
+
+--
+-- Name: index_freight_quotes_on_supplier_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_freight_quotes_on_supplier_observation_id ON public.freight_quotes USING btree (supplier_observation_id);
 
 
 --
@@ -3381,6 +3988,13 @@ CREATE UNIQUE INDEX index_users_on_public_id ON public.users USING btree (public
 
 
 --
+-- Name: checkout_intents checkout_intents_execution_mode_immutable; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER checkout_intents_execution_mode_immutable BEFORE UPDATE ON public.checkout_intents FOR EACH ROW EXECUTE FUNCTION public.nudge_prevent_execution_mode_change();
+
+
+--
 -- Name: catalog_media db04_catalog_media_encryption_context; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -3564,6 +4178,14 @@ ALTER TABLE ONLY public.clarification_decisions
 
 
 --
+-- Name: checkout_validation_items fk_rails_07485feb17; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validation_items
+    ADD CONSTRAINT fk_rails_07485feb17 FOREIGN KEY (checkout_validation_id) REFERENCES public.checkout_validations(id) ON DELETE CASCADE;
+
+
+--
 -- Name: product_facts fk_rails_0cbcdb0a9b; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3628,11 +4250,35 @@ ALTER TABLE ONLY public.eligibility_results
 
 
 --
+-- Name: freight_quotes fk_rails_28066e4c06; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.freight_quotes
+    ADD CONSTRAINT fk_rails_28066e4c06 FOREIGN KEY (supplier_observation_id) REFERENCES public.supplier_observations(id) ON DELETE SET NULL;
+
+
+--
 -- Name: consent_records fk_rails_282f08b4f7; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.consent_records
     ADD CONSTRAINT fk_rails_282f08b4f7 FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: checkout_validation_items fk_rails_28d3b2b5cb; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validation_items
+    ADD CONSTRAINT fk_rails_28d3b2b5cb FOREIGN KEY (inventory_observation_id) REFERENCES public.inventory_observations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: checkout_validations fk_rails_2c2823217f; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validations
+    ADD CONSTRAINT fk_rails_2c2823217f FOREIGN KEY (cart_id) REFERENCES public.carts(id) ON DELETE RESTRICT;
 
 
 --
@@ -3660,11 +4306,27 @@ ALTER TABLE ONLY public.sync_checkpoints
 
 
 --
+-- Name: freight_quotes fk_rails_43b200d984; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.freight_quotes
+    ADD CONSTRAINT fk_rails_43b200d984 FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: external_identities fk_rails_47162efee6; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.external_identities
     ADD CONSTRAINT fk_rails_47162efee6 FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cart_mutations fk_rails_4f4f212da9; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_mutations
+    ADD CONSTRAINT fk_rails_4f4f212da9 FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE RESTRICT;
 
 
 --
@@ -3689,6 +4351,22 @@ ALTER TABLE ONLY public.supplier_variants
 
 ALTER TABLE ONLY public.agent_tool_calls
     ADD CONSTRAINT fk_rails_637ac09801 FOREIGN KEY (agent_run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cart_items fk_rails_6cdb1f0139; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_items
+    ADD CONSTRAINT fk_rails_6cdb1f0139 FOREIGN KEY (cart_id) REFERENCES public.carts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: checkout_validation_items fk_rails_785fd695ef; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validation_items
+    ADD CONSTRAINT fk_rails_785fd695ef FOREIGN KEY (price_observation_id) REFERENCES public.price_observations(id) ON DELETE SET NULL;
 
 
 --
@@ -3748,11 +4426,27 @@ ALTER TABLE ONLY public.recommendation_runs
 
 
 --
+-- Name: cart_mutations fk_rails_857f4a143d; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_mutations
+    ADD CONSTRAINT fk_rails_857f4a143d FOREIGN KEY (cart_id) REFERENCES public.carts(id) ON DELETE CASCADE;
+
+
+--
 -- Name: recommendation_evidence fk_rails_88f140565e; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.recommendation_evidence
     ADD CONSTRAINT fk_rails_88f140565e FOREIGN KEY (inventory_observation_id) REFERENCES public.inventory_observations(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: checkout_validation_items fk_rails_8e0e92817e; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_validation_items
+    ADD CONSTRAINT fk_rails_8e0e92817e FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE RESTRICT;
 
 
 --
@@ -3809,6 +4503,22 @@ ALTER TABLE ONLY public.requirements
 
 ALTER TABLE ONLY public.recommendation_evidence
     ADD CONSTRAINT fk_rails_9a9cd2a966 FOREIGN KEY (recommendation_candidate_id) REFERENCES public.recommendation_candidates(id) ON DELETE CASCADE;
+
+
+--
+-- Name: checkout_intents fk_rails_9b2b4a145d; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checkout_intents
+    ADD CONSTRAINT fk_rails_9b2b4a145d FOREIGN KEY (cart_id) REFERENCES public.carts(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: carts fk_rails_9d6e159fba; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.carts
+    ADD CONSTRAINT fk_rails_9d6e159fba FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE RESTRICT;
 
 
 --
@@ -3900,6 +4610,14 @@ ALTER TABLE ONLY public.products
 
 
 --
+-- Name: freight_quotes fk_rails_cc9b44feab; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.freight_quotes
+    ADD CONSTRAINT fk_rails_cc9b44feab FOREIGN KEY (checkout_validation_id) REFERENCES public.checkout_validations(id) ON DELETE CASCADE;
+
+
+--
 -- Name: requirements fk_rails_ccce84f25c; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3921,6 +4639,14 @@ ALTER TABLE ONLY public.embeddings
 
 ALTER TABLE ONLY public.shopping_messages
     ADD CONSTRAINT fk_rails_ce3d4b27c5 FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cart_items fk_rails_d2dc263ba2; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_items
+    ADD CONSTRAINT fk_rails_d2dc263ba2 FOREIGN KEY (price_observation_id) REFERENCES public.price_observations(id) ON DELETE SET NULL;
 
 
 --
@@ -3956,6 +4682,14 @@ ALTER TABLE ONLY public.requirements
 
 
 --
+-- Name: carts fk_rails_ea59a35211; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.carts
+    ADD CONSTRAINT fk_rails_ea59a35211 FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
 -- Name: clarification_decisions fk_rails_f057674bdb; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3985,6 +4719,14 @@ ALTER TABLE ONLY public.product_facts
 
 ALTER TABLE ONLY public.catalog_media
     ADD CONSTRAINT fk_rails_f30bd63329 FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cart_items fk_rails_ffa5d55b09; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cart_items
+    ADD CONSTRAINT fk_rails_ffa5d55b09 FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE RESTRICT;
 
 
 --
@@ -4034,6 +4776,7 @@ ALTER TABLE ONLY public.supplier_variants
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260920000007'),
 ('20260920000006'),
 ('20260920000005'),
 ('20260920000004'),
