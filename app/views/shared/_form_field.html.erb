@@ -14,7 +14,7 @@
       type: local_assigns.fetch(:type, "text"),
       autocomplete: local_assigns.fetch(:autocomplete, nil),
       aria: { invalid: field_errors.any?.to_s, describedby: described_by },
-      class: "min-h-11 w-full rounded-xl border border-line bg-surface px-4 py-2.5 text-ink placeholder:text-muted focus:border-brand-700 focus:outline-none focus:ring-4 focus:ring-brand-200" %>
+      class: "min-h-11 w-full rounded-xl border border-control-border bg-surface px-4 py-2.5 text-ink placeholder:text-muted focus:border-brand-700 focus:outline-none focus:ring-4 focus:ring-focus-ring focus:ring-offset-2" %>
   <% if errors_id %>
     <ul id="<%= errors_id %>" role="alert" class="space-y-1 text-sm font-semibold text-danger-700">
       <% field_errors.each do |error| %>

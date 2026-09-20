@@ -23,22 +23,22 @@
   </head>
 
   <body class="min-h-screen bg-canvas font-sans text-ink antialiased">
-    <a href="#main-content" class="fixed left-4 top-4 z-50 -translate-y-24 rounded-full bg-ink px-5 py-3 font-semibold text-white shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200 motion-reduce:transition-none">
+    <a href="#main-content" class="fixed left-4 top-4 z-50 -translate-y-24 rounded-full bg-ink px-5 py-3 font-semibold text-white shadow-lg transition-transform focus:translate-y-0 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2 motion-reduce:transition-none">
       Skip to content
     </a>
 
     <div class="flex min-h-screen flex-col">
       <header class="border-b border-line/80 bg-canvas/95">
         <div class="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
-          <%= link_to root_path, class: "inline-flex min-h-11 items-center gap-3 rounded-full px-2 font-display text-xl font-bold tracking-tight text-ink focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200" do %>
+          <%= link_to root_path, class: "inline-flex min-h-11 items-center gap-3 rounded-full px-2 font-display text-xl font-bold tracking-tight text-ink focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" do %>
             <span class="grid size-9 place-items-center rounded-full bg-brand-700 text-sm font-bold text-white" aria-hidden="true">N</span>
             <span>Nudge</span>
           <% end %>
 
           <nav aria-label="Primary navigation">
             <ul class="flex flex-wrap items-center gap-1 text-sm font-semibold text-muted">
-              <li><%= link_to "Home", root_path, aria: { current: "page" }, class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200" %></li>
-              <li><%= link_to "How it works", "#how-it-works", class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-brand-200" %></li>
+              <li><%= link_to "Home", root_path, aria: { current: "page" }, class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %></li>
+              <li><%= link_to "How it works", "#how-it-works", class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %></li>
             </ul>
           </nav>
         </div>
