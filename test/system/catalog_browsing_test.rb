@@ -31,6 +31,39 @@ class CatalogBrowsingTest < ApplicationSystemTestCase
     end
   end
 
+  { "short" => "I", "maximum unbroken" => "W" * 200 }.each do |label, title|
+    test "rendered #{label} card title fits a compact phone with a full touch target" do
+      set_viewport(320, 720)
+      visit products_path
+      product = Catalog::FixtureProductReader.new.detail(id: "00001234").with(title: title.freeze)
+      card = ApplicationController.render(partial: "shared/catalog/product_card", locals: { product: })
+
+      # Render the real partial with boundary data into the served page's real CSS/layout.
+      page.execute_script("document.querySelector('main article').outerHTML = arguments[0]", card)
+
+      assert_selector "article h2 a", exact_text: title
+      assert_no_horizontal_overflow(label)
+      assert_minimum_target_sizes(label)
+      bounds = page.evaluate_script(<<~JAVASCRIPT)
+        (() => {
+          const link = document.querySelector('main article h2 a');
+          const card = link.closest('article').getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(link);
+          return {
+            left: card.left, right: card.right,
+            rows: Array.from(range.getClientRects()).map(rect => ({ left: rect.left, right: rect.right }))
+          };
+        })()
+      JAVASCRIPT
+      assert_operator bounds.fetch("rows").length, :>, 1 if title.bytesize == 200
+      bounds.fetch("rows").each do |row|
+        assert_operator row.fetch("left"), :>=, bounds.fetch("left") - 1
+        assert_operator row.fetch("right"), :<=, bounds.fetch("right") + 1
+      end
+    end
+  end
+
   test "empty and not found states remain navigable" do
     visit products_path(cursor: "1")
     assert_selector "h1", text: "Browse the sample catalog"
@@ -74,6 +107,7 @@ class CatalogBrowsingTest < ApplicationSystemTestCase
       assert_selector "main#main-content", count: 1
       assert_selector "footer", count: 1
       assert_selector "h1", count: 1, text: heading
+      assert_equal "h1", page.first("main h1, main h2, main h3").tag_name
     rescue Minitest::Assertion => error
       raise Minitest::Assertion, "#{viewport}: #{error.message}"
     end

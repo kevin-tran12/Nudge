@@ -3,16 +3,15 @@
 <section class="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
   <%= link_to "Back to catalog", products_path, class: "inline-flex min-h-11 min-w-11 items-center rounded-full px-4 text-sm font-bold text-brand-800 hover:bg-brand-50 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %>
 
-  <div data-catalog-disclosure class="mt-6">
-    <%= render "shared/notice", title: "Illustrative product", message: "This page uses sample fixture data. Prices and availability are illustrative and are not live supplier offers.", tone: :warning %>
-  </div>
-
   <div class="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-2 lg:items-start">
     <%= render "shared/catalog/image_placeholder" %>
 
     <div class="min-w-0">
       <%= render "shared/badge", label: "Sample item", tone: :warning %>
       <h1 class="mt-4 break-words font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl"><%= @product.title %></h1>
+      <div data-catalog-disclosure class="mt-6">
+        <%= render "shared/notice", title: "Illustrative product", message: "This page uses sample fixture data. Prices and availability are illustrative and are not live supplier offers.", tone: :warning %>
+      </div>
       <% if @product.sku.present? %><p class="mt-3 break-all text-sm font-semibold text-muted">Reference: <%= @product.sku %></p><% end %>
       <% if @product.description.present? %><p class="mt-5 break-words text-base leading-7 text-muted"><%= @product.description %></p><% end %>
       <% if @product.freshness.observed_at %>

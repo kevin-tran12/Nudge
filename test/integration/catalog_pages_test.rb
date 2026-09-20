@@ -19,6 +19,7 @@ class CatalogPagesTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_select "h1", text: "Stacking storage bin"
+    assert_equal "h1", Nokogiri::HTML(response.body).at_css("main h1, main h2, main h3").name
     assert_select "[data-price-state='known']", text: /Illustrative price: USD 12\.34/
     assert_select "[data-price-state='unknown']", text: /Illustrative price unavailable/
     assert_select "[data-availability-state='available']", text: /9 units observed/
@@ -26,6 +27,17 @@ class CatalogPagesTest < ActionDispatch::IntegrationTest
     assert_select "[data-inventory-disclaimer]", text: /not reserved.*eligibility.*guaranteed/i
     assert_select "img", count: 0
     refute_includes response.body, "cf.cjdropshipping.com"
+  end
+
+  test "card title bounds preserve short and maximum unbroken product names" do
+    [ "I", "W" * 200 ].each do |title|
+      product = catalog_product(title:, description: nil)
+      with_reader(StaticReader.new(page: catalog_page(product))) { get products_path }
+
+      assert_response :success
+      assert_select "article h2 a.min-w-11[href='#{product_path(product.id)}']", text: title
+      assert_equal title, Nokogiri::HTML(response.body).at_css("article h2 a").text
+    end
   end
 
   test "supplier text is escaped and opaque media references never become fetch attributes" do
@@ -100,23 +112,27 @@ class CatalogPagesTest < ActionDispatch::IntegrationTest
     refute_includes response.body, "Catalog reader:"
   end
 
-  test "production fails generically before constructing a fixture reader" do
+  test "production reader construction fails without changing the Rails environment" do
     production = ActiveSupport::EnvironmentInquirer.new("production")
+    original_environment = Rails.env
+    original_cable_config = ActionCable.server.config.cable.deep_dup
     fixture_constructed = false
 
-    with_singleton_method(Rails, :env, -> { production }) do
-      replacement = lambda do |*|
-        fixture_constructed = true
-        flunk "fixture reader constructed"
-      end
-      with_singleton_method(Catalog::FixtureProductReader, :new, replacement) do
-        get products_path
+    replacement = lambda do |*|
+      fixture_constructed = true
+      flunk "fixture reader constructed"
+    end
+    error = with_singleton_method(Catalog::FixtureProductReader, :new, replacement) do
+      assert_raises(Catalog::ProductReader::Error) do
+        ProductsController.build_product_reader(environment: production)
       end
     end
 
-    assert_response :service_unavailable
+    assert_equal :source_unavailable, error.code
+    assert_nil error.cause
     refute fixture_constructed
-    assert_select "h1", text: "Sample catalog unavailable"
+    assert_same original_environment, Rails.env
+    assert_equal original_cable_config, ActionCable.server.config.cable
   end
 
   private

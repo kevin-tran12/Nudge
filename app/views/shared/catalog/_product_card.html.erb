@@ -11,8 +11,8 @@
       <% end %>
     </div>
 
-    <h2 class="mt-4 font-display text-2xl font-bold tracking-tight text-ink">
-      <%= link_to product.title, product_path(product.id), class: "inline-flex min-h-11 items-center rounded-lg text-left hover:text-brand-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %>
+    <h2 class="mt-4 min-w-0 font-display text-2xl font-bold tracking-tight text-ink">
+      <%= link_to product.title, product_path(product.id), class: "inline-flex min-h-11 min-w-11 max-w-full items-center break-all rounded-lg text-left hover:text-brand-700 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %>
     </h2>
     <% if product.description.present? %>
       <p class="mt-2 break-words text-sm leading-6 text-muted"><%= product.description %></p>
