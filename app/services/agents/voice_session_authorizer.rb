@@ -38,13 +38,22 @@ module Agents
       end
     end
 
-    Result = Data.define(:conversation_token, :agent_id, :expires_at) do
+    # grant_token is the raw AI-grant bearer the browser must present to the tool
+    # endpoint. It is returned exactly once, kept out of inspect, and held only in
+    # memory by the client. The conversation token authenticates the provider
+    # widget and is not accepted as an application credential.
+    Result = Data.define(:conversation_token, :grant_token, :agent_id, :expires_at) do
       def inspect
         "#<#{self.class.name} agent_id=#{agent_id.inspect} expires_at=#{expires_at.iso8601}>"
       end
 
       def as_json(*)
-        { "conversation_token" => conversation_token, "agent_id" => agent_id, "expires_at" => expires_at.iso8601 }
+        {
+          "conversation_token" => conversation_token,
+          "grant_token" => grant_token,
+          "agent_id" => agent_id,
+          "expires_at" => expires_at.iso8601
+        }
       end
 
       def to_json(...)
@@ -94,6 +103,7 @@ module Agents
       authorization = @adapter.conversation_authorization
       Result.new(
         conversation_token: authorization.conversation_token,
+        grant_token: grant_result.bearer_token,
         agent_id: authorization.agent_id,
         expires_at: [ grant_result.grant.expires_at, authorization.expires_at ].min
       ).freeze

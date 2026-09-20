@@ -168,6 +168,7 @@
 
         self.grant = {
           conversationToken: body.conversation_token,
+          grantToken: body.grant_token,
           agentId: body.agent_id,
           expiresAt: body.expires_at
         };
@@ -270,7 +271,7 @@
         "Content-Type": "application/json",
         Accept: "application/json",
         "X-CSRF-Token": csrfToken() || "",
-        Authorization: "Bearer " + grant.conversationToken
+        Authorization: "Bearer " + grant.grantToken
       },
       body: JSON.stringify(args || {})
     })
