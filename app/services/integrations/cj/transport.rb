@@ -78,10 +78,21 @@ module Integrations
       # codes embedded in a 200 OK envelope (e.g. quota/auth codes) are left for
       # Integrations::Cj::Normalizer to interpret; this method only classifies
       # HTTP transport-level outcomes.
-      # CJ's query/list endpoints (product/list) are GET with query parameters;
-      # the write-shaped lookups (product/query, stock, freight) are POST with a
-      # JSON body. This set is the wire contract, not a normalization choice.
-      GET_OPERATIONS = %i[product_list].freeze
+      # Verified against the live provider on 2026-09-20: product/list,
+      # product/query and product/stock/queryByVid are all GET with query
+      # parameters. Only freight remains a POST with a JSON body. This set is
+      # the wire contract, not a normalization choice.
+      GET_OPERATIONS = %i[product_list product inventory].freeze
+
+      # The adapter names its request keys for the domain; CJ names them for the
+      # wire. Translating here keeps the wire spelling out of the artifact's
+      # recorded request, the validator's allowlists and the fixtures, all of
+      # which key on the domain names. A key with no entry is passed through,
+      # which is why product_list (already CJ-spelled) needs none.
+      WIRE_PARAMETERS = {
+        product: { "product_id" => "pid" },
+        inventory: { "variant_id" => "vid" }
+      }.freeze
 
       def call(operation:, token:, request:)
         path = "#{BASE_PATH}/#{Normalizer::ENDPOINTS.fetch(operation)}"
@@ -92,13 +103,20 @@ module Integrations
 
         headers = { "CJ-Access-Token" => token }
         if GET_OPERATIONS.include?(operation)
-          get(path, headers: headers, query: request)
+          get(path, headers: headers, query: wire_parameters(operation, request))
         else
           post(path, headers: headers.merge("Content-Type" => "application/json"), body: JSON.generate(request))
         end
       end
 
       private
+
+      def wire_parameters(operation, request)
+        raise Error.new(:invalid_input), cause: nil unless request.is_a?(Hash)
+
+        mapping = WIRE_PARAMETERS.fetch(operation, {})
+        request.transform_keys { |key| mapping.fetch(key.to_s, key) }
+      end
 
       def post(path, headers:, body:)
         uri = URI::HTTPS.build(host: HOST, path: path)
