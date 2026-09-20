@@ -25,3 +25,32 @@ docker compose run --rm -e RAILS_ENV=test app bin/rails test test/contracts/cj_a
 ```
 
 The Rails test harness itself requires the isolated test database to be prepared as described in the repository README. The adapter makes no database queries. These tests are also discovered by `bin/test-integration` and `bin/test-all`.
+
+## Offline record-artifact validation
+
+`Integrations::Cj::RecordArtifactValidator` is the offline gate for a future,
+owner-authorized `record` runner. It accepts an explicit approved operation, the
+operation's already-normalized request, raw response bytes, and an explicit UTC
+observation timestamp. It does not select a mode, obtain credentials, spend
+points, make network or database calls, retry, sleep, read a clock, choose a
+path, or write a file.
+
+The validator accepts only the documented v1 product, inventory, and freight
+shapes represented here. It rejects duplicate JSON keys, unexpected fields,
+credential/customer/signature fields, active markup, malformed values, unsafe
+media references, and response/request identity mismatches. Unknown provider
+fields require review before the v1 allowlists change; they are never silently
+recorded. Provider diagnostic `message` text is omitted from generated
+artifacts.
+
+A successful call returns immutable canonical JSON bytes, their SHA-256 digest,
+and the normalized result with record-artifact provenance. The canonical JSON
+has the same `fixture_version`, `observed_at`, `request`, and `response` envelope
+used by these fixtures and can be replayed through the existing normalizer.
+Identical inputs produce identical bytes and hashes. The caller remains
+responsible for any later reviewed filesystem write and deduplication.
+
+This gate does not enable `verify`, `record`, or `live` transport. Before a
+transport is connected, current official evidence must establish the exact API
+origin, method/path, authentication headers and token response, HTTP error and
+retry semantics, redirects, per-operation point costs, and idempotency support.
