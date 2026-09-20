@@ -162,6 +162,28 @@ module Integrations
 
           value.dup
         end
+
+        def page_number(value)
+          raise Error.new(:invalid_input) unless value.is_a?(Integer) && value >= 1
+
+          value
+        end
+
+        def bounded_page_size(value)
+          raise Error.new(:invalid_input) unless value.is_a?(Integer) && value.between?(1, MAX_PAGE_SIZE)
+
+          value
+        end
+
+        def optional_filter(value)
+          return nil if value.nil?
+          unless value.is_a?(String) && value.valid_encoding? && value.bytesize.between?(1, MAX_FILTER_BYTES) &&
+              !value.match?(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/)
+            raise Error.new(:invalid_input)
+          end
+
+          value.dup
+        end
     end
   end
 end
