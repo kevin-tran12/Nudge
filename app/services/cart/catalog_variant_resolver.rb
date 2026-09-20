@@ -16,6 +16,11 @@ module Cart
   # from a stored/local value and never from caller input.
   class CatalogVariantResolver
     SUPPLIER_KEY = "cj"
+    # Matches Integrations::Cj::Normalizer's fixed provenance and the values
+    # db/seeds.rb and the CAT-IMPORT-01 tests already use for this same
+    # registry row, so a row created by either path is interchangeable.
+    SUPPLIER_ADAPTER_VERSION = "1"
+    SUPPLIER_API_VERSION = "v1"
 
     Resolution = Data.define(:product_variant, :price, :availability)
 
@@ -38,7 +43,16 @@ module Cart
 
     private
       def supplier
-        @supplier ||= Supplier.find_by(key: SUPPLIER_KEY) || raise(Cart::Error.new(:catalog_not_configured))
+        @supplier ||= Supplier.find_by(key: SUPPLIER_KEY) || create_supplier!
+      end
+
+      def create_supplier!
+        Supplier.create!(
+          key: SUPPLIER_KEY, display_name: "CJ Dropshipping",
+          adapter_version: SUPPLIER_ADAPTER_VERSION, api_version: SUPPLIER_API_VERSION, status: "active"
+        )
+      rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+        Supplier.find_by(key: SUPPLIER_KEY) || raise(Cart::Error.new(:catalog_not_configured))
       end
 
       def find_or_create_local_variant!(product, variant)
