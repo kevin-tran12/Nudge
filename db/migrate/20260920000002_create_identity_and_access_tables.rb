@@ -209,13 +209,23 @@ class CreateIdentityAndAccessTables < ActiveRecord::Migration[8.1]
       primary_key: [ :id, :shopping_session_id ],
       on_delete: :restrict,
       name: "fk_ai_grants_consent_session"
-    execute <<~SQL
-      ALTER TABLE ai_access_grants
-      ADD CONSTRAINT fk_ai_grants_turnstile_session
-      FOREIGN KEY (turnstile_verification_id, shopping_session_id)
-      REFERENCES turnstile_verifications (id, shopping_session_id)
-      ON DELETE SET NULL (turnstile_verification_id)
-    SQL
+    reversible do |direction|
+      direction.up do
+        execute <<~SQL
+          ALTER TABLE ai_access_grants
+          ADD CONSTRAINT fk_ai_grants_turnstile_session
+          FOREIGN KEY (turnstile_verification_id, shopping_session_id)
+          REFERENCES turnstile_verifications (id, shopping_session_id)
+          ON DELETE SET NULL (turnstile_verification_id)
+        SQL
+      end
+      direction.down do
+        execute <<~SQL
+          ALTER TABLE ai_access_grants
+          DROP CONSTRAINT fk_ai_grants_turnstile_session
+        SQL
+      end
+    end
     add_check_constraint :ai_access_grants,
       "octet_length(grant_token_digest) = 32",
       name: "ai_access_grants_token_digest_length_check"
