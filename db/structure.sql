@@ -173,6 +173,46 @@ CREATE TABLE public.ar_internal_metadata (
 
 
 --
+-- Name: categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.categories (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    key text NOT NULL,
+    name text NOT NULL,
+    parent_id bigint,
+    status text DEFAULT 'active'::text NOT NULL,
+    "position" integer DEFAULT 0 NOT NULL,
+    profile_version integer NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT categories_not_self_parent_check CHECK (((parent_id IS NULL) OR (parent_id <> id))),
+    CONSTRAINT categories_position_check CHECK (("position" >= 0)),
+    CONSTRAINT categories_profile_version_check CHECK ((profile_version >= 0))
+);
+
+
+--
+-- Name: categories_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.categories_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.categories_id_seq OWNED BY public.categories.id;
+
+
+--
 -- Name: consent_records; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -261,6 +301,134 @@ ALTER SEQUENCE public.external_identities_id_seq OWNED BY public.external_identi
 
 
 --
+-- Name: product_categories; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_categories (
+    id bigint NOT NULL,
+    product_id bigint NOT NULL,
+    category_id bigint NOT NULL,
+    provenance text NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL
+);
+
+
+--
+-- Name: product_categories_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.product_categories_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: product_categories_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.product_categories_id_seq OWNED BY public.product_categories.id;
+
+
+--
+-- Name: product_variants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.product_variants (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    product_id bigint NOT NULL,
+    canonical_sku text,
+    title text NOT NULL,
+    option_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    option_schema_version smallint NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    weight_value numeric(14,4),
+    weight_unit text,
+    length_value numeric(14,4),
+    width_value numeric(14,4),
+    height_value numeric(14,4),
+    dimension_unit text,
+    lock_version integer DEFAULT 0 NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT product_variants_dimension_unit_check CHECK (((dimension_unit IS NULL) = ((length_value IS NULL) AND (width_value IS NULL) AND (height_value IS NULL)))),
+    CONSTRAINT product_variants_lock_version_check CHECK ((lock_version >= 0)),
+    CONSTRAINT product_variants_measurements_nonnegative_check CHECK ((((weight_value IS NULL) OR ((weight_value <> 'NaN'::numeric) AND (weight_value >= (0)::numeric))) AND ((length_value IS NULL) OR ((length_value <> 'NaN'::numeric) AND (length_value >= (0)::numeric))) AND ((width_value IS NULL) OR ((width_value <> 'NaN'::numeric) AND (width_value >= (0)::numeric))) AND ((height_value IS NULL) OR ((height_value <> 'NaN'::numeric) AND (height_value >= (0)::numeric))))),
+    CONSTRAINT product_variants_option_object_check CHECK ((jsonb_typeof(option_summary) = 'object'::text)),
+    CONSTRAINT product_variants_option_version_check CHECK ((option_schema_version > 0)),
+    CONSTRAINT product_variants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'unavailable'::text, 'retired'::text]))),
+    CONSTRAINT product_variants_weight_unit_pair_check CHECK (((weight_value IS NULL) = (weight_unit IS NULL)))
+);
+
+
+--
+-- Name: product_variants_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.product_variants_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: product_variants_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.product_variants_id_seq OWNED BY public.product_variants.id;
+
+
+--
+-- Name: products; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.products (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    title text NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    product_type text,
+    brand text,
+    primary_category_id bigint,
+    published_at timestamp(6) with time zone,
+    retired_at timestamp(6) with time zone,
+    lock_version integer DEFAULT 0 NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT products_lock_version_check CHECK ((lock_version >= 0)),
+    CONSTRAINT products_retired_after_published_check CHECK (((published_at IS NULL) OR (retired_at IS NULL) OR (retired_at >= published_at))),
+    CONSTRAINT products_retired_state_check CHECK (((status = 'retired'::text) = (retired_at IS NOT NULL))),
+    CONSTRAINT products_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'active'::text, 'unavailable'::text, 'retired'::text])))
+);
+
+
+--
+-- Name: products_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.products_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: products_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.products_id_seq OWNED BY public.products.id;
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -310,6 +478,178 @@ CREATE SEQUENCE public.shopping_sessions_id_seq
 --
 
 ALTER SEQUENCE public.shopping_sessions_id_seq OWNED BY public.shopping_sessions.id;
+
+
+--
+-- Name: supplier_products; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.supplier_products (
+    id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    product_id bigint NOT NULL,
+    external_product_id text NOT NULL,
+    external_sku text,
+    external_category_id text,
+    status text NOT NULL,
+    first_seen_at timestamp(6) with time zone NOT NULL,
+    last_seen_at timestamp(6) with time zone NOT NULL,
+    last_synced_at timestamp(6) with time zone,
+    adapter_version text NOT NULL,
+    latest_observation_id bigint,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT supplier_products_seen_time_check CHECK ((last_seen_at >= first_seen_at)),
+    CONSTRAINT supplier_products_sync_time_check CHECK (((last_synced_at IS NULL) OR (last_synced_at >= last_seen_at)))
+);
+
+
+--
+-- Name: supplier_products_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.supplier_products_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: supplier_products_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.supplier_products_id_seq OWNED BY public.supplier_products.id;
+
+
+--
+-- Name: supplier_variants; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.supplier_variants (
+    id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    product_variant_id bigint NOT NULL,
+    supplier_product_id bigint NOT NULL,
+    external_variant_id text NOT NULL,
+    external_variant_sku text,
+    barcode text,
+    weight_value numeric(14,4),
+    weight_unit text,
+    length_value numeric(14,4),
+    width_value numeric(14,4),
+    height_value numeric(14,4),
+    dimension_unit text,
+    status text NOT NULL,
+    first_seen_at timestamp(6) with time zone NOT NULL,
+    last_seen_at timestamp(6) with time zone NOT NULL,
+    last_synced_at timestamp(6) with time zone,
+    latest_observation_id bigint,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT supplier_variants_dimension_unit_check CHECK (((dimension_unit IS NULL) = ((length_value IS NULL) AND (width_value IS NULL) AND (height_value IS NULL)))),
+    CONSTRAINT supplier_variants_measurements_nonnegative_check CHECK ((((weight_value IS NULL) OR ((weight_value <> 'NaN'::numeric) AND (weight_value >= (0)::numeric))) AND ((length_value IS NULL) OR ((length_value <> 'NaN'::numeric) AND (length_value >= (0)::numeric))) AND ((width_value IS NULL) OR ((width_value <> 'NaN'::numeric) AND (width_value >= (0)::numeric))) AND ((height_value IS NULL) OR ((height_value <> 'NaN'::numeric) AND (height_value >= (0)::numeric))))),
+    CONSTRAINT supplier_variants_seen_time_check CHECK ((last_seen_at >= first_seen_at)),
+    CONSTRAINT supplier_variants_sync_time_check CHECK (((last_synced_at IS NULL) OR (last_synced_at >= last_seen_at))),
+    CONSTRAINT supplier_variants_weight_unit_pair_check CHECK (((weight_value IS NULL) = (weight_unit IS NULL)))
+);
+
+
+--
+-- Name: supplier_variants_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.supplier_variants_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: supplier_variants_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.supplier_variants_id_seq OWNED BY public.supplier_variants.id;
+
+
+--
+-- Name: supplier_warehouses; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.supplier_warehouses (
+    id bigint NOT NULL,
+    supplier_id bigint NOT NULL,
+    external_warehouse_id text NOT NULL,
+    country_code character(2),
+    region_code text,
+    name text,
+    verification_state text,
+    status text NOT NULL,
+    first_seen_at timestamp(6) with time zone NOT NULL,
+    last_seen_at timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT supplier_warehouses_country_code_check CHECK (((country_code IS NULL) OR (country_code ~ '^[A-Z]{2}$'::text))),
+    CONSTRAINT supplier_warehouses_seen_time_check CHECK ((last_seen_at >= first_seen_at))
+);
+
+
+--
+-- Name: supplier_warehouses_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.supplier_warehouses_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: supplier_warehouses_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.supplier_warehouses_id_seq OWNED BY public.supplier_warehouses.id;
+
+
+--
+-- Name: suppliers; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.suppliers (
+    id bigint NOT NULL,
+    key text NOT NULL,
+    display_name text NOT NULL,
+    adapter_version text NOT NULL,
+    api_version text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT suppliers_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text])))
+);
+
+
+--
+-- Name: suppliers_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.suppliers_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: suppliers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.suppliers_id_seq OWNED BY public.suppliers.id;
 
 
 --
@@ -419,6 +759,13 @@ ALTER TABLE ONLY public.ai_access_grants ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
+-- Name: categories id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories ALTER COLUMN id SET DEFAULT nextval('public.categories_id_seq'::regclass);
+
+
+--
 -- Name: consent_records id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -433,10 +780,59 @@ ALTER TABLE ONLY public.external_identities ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
+-- Name: product_categories id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_categories ALTER COLUMN id SET DEFAULT nextval('public.product_categories_id_seq'::regclass);
+
+
+--
+-- Name: product_variants id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_variants ALTER COLUMN id SET DEFAULT nextval('public.product_variants_id_seq'::regclass);
+
+
+--
+-- Name: products id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.products ALTER COLUMN id SET DEFAULT nextval('public.products_id_seq'::regclass);
+
+
+--
 -- Name: shopping_sessions id; Type: DEFAULT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.shopping_sessions ALTER COLUMN id SET DEFAULT nextval('public.shopping_sessions_id_seq'::regclass);
+
+
+--
+-- Name: supplier_products id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_products ALTER COLUMN id SET DEFAULT nextval('public.supplier_products_id_seq'::regclass);
+
+
+--
+-- Name: supplier_variants id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_variants ALTER COLUMN id SET DEFAULT nextval('public.supplier_variants_id_seq'::regclass);
+
+
+--
+-- Name: supplier_warehouses id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_warehouses ALTER COLUMN id SET DEFAULT nextval('public.supplier_warehouses_id_seq'::regclass);
+
+
+--
+-- Name: suppliers id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.suppliers ALTER COLUMN id SET DEFAULT nextval('public.suppliers_id_seq'::regclass);
 
 
 --
@@ -478,6 +874,14 @@ ALTER TABLE ONLY public.ar_internal_metadata
 
 
 --
+-- Name: categories categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT categories_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: consent_records consent_records_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -494,6 +898,30 @@ ALTER TABLE ONLY public.external_identities
 
 
 --
+-- Name: product_categories product_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_categories
+    ADD CONSTRAINT product_categories_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: product_variants product_variants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_variants
+    ADD CONSTRAINT product_variants_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: products products_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.products
+    ADD CONSTRAINT products_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -507,6 +935,38 @@ ALTER TABLE ONLY public.schema_migrations
 
 ALTER TABLE ONLY public.shopping_sessions
     ADD CONSTRAINT shopping_sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: supplier_products supplier_products_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_products
+    ADD CONSTRAINT supplier_products_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: supplier_variants supplier_variants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_variants
+    ADD CONSTRAINT supplier_variants_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: supplier_warehouses supplier_warehouses_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_warehouses
+    ADD CONSTRAINT supplier_warehouses_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: suppliers suppliers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.suppliers
+    ADD CONSTRAINT suppliers_pkey PRIMARY KEY (id);
 
 
 --
@@ -530,6 +990,13 @@ ALTER TABLE ONLY public.users
 --
 
 CREATE INDEX idx_on_ai_access_grant_id_shopping_session_id_9e8d55f505 ON public.agent_provider_sessions USING btree (ai_access_grant_id, shopping_session_id);
+
+
+--
+-- Name: idx_on_supplier_id_external_warehouse_id_735098a127; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_on_supplier_id_external_warehouse_id_735098a127 ON public.supplier_warehouses USING btree (supplier_id, external_warehouse_id);
 
 
 --
@@ -596,6 +1063,27 @@ CREATE UNIQUE INDEX index_ai_access_grants_on_turnstile_verification_id ON publi
 
 
 --
+-- Name: index_categories_on_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_categories_on_key ON public.categories USING btree (key);
+
+
+--
+-- Name: index_categories_on_parent_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_categories_on_parent_id ON public.categories USING btree (parent_id);
+
+
+--
+-- Name: index_categories_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_categories_on_public_id ON public.categories USING btree (public_id);
+
+
+--
 -- Name: index_consent_records_on_active_policy; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -652,6 +1140,62 @@ CREATE INDEX index_external_identities_on_user_id ON public.external_identities 
 
 
 --
+-- Name: index_product_categories_on_category_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_categories_on_category_id ON public.product_categories USING btree (category_id);
+
+
+--
+-- Name: index_product_categories_on_product_id_and_category_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_product_categories_on_product_id_and_category_id ON public.product_categories USING btree (product_id, category_id);
+
+
+--
+-- Name: index_product_variants_on_canonical_sku; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_product_variants_on_canonical_sku ON public.product_variants USING btree (canonical_sku) WHERE (canonical_sku IS NOT NULL);
+
+
+--
+-- Name: index_product_variants_on_product_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_product_variants_on_product_id ON public.product_variants USING btree (product_id);
+
+
+--
+-- Name: index_product_variants_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_product_variants_on_public_id ON public.product_variants USING btree (public_id);
+
+
+--
+-- Name: index_products_on_primary_category_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_products_on_primary_category_id ON public.products USING btree (primary_category_id);
+
+
+--
+-- Name: index_products_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_products_on_public_id ON public.products USING btree (public_id);
+
+
+--
+-- Name: index_products_on_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_products_on_status ON public.products USING btree (status);
+
+
+--
 -- Name: index_shopping_sessions_on_public_id; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -670,6 +1214,83 @@ CREATE INDEX index_shopping_sessions_on_status_and_expires_at ON public.shopping
 --
 
 CREATE INDEX index_shopping_sessions_on_user_id_and_status ON public.shopping_sessions USING btree (user_id, status);
+
+
+--
+-- Name: index_supplier_products_on_id_and_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_products_on_id_and_supplier_id ON public.supplier_products USING btree (id, supplier_id);
+
+
+--
+-- Name: index_supplier_products_on_latest_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_products_on_latest_observation_id ON public.supplier_products USING btree (latest_observation_id);
+
+
+--
+-- Name: index_supplier_products_on_product_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_products_on_product_id ON public.supplier_products USING btree (product_id);
+
+
+--
+-- Name: index_supplier_products_on_supplier_id_and_external_product_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_products_on_supplier_id_and_external_product_id ON public.supplier_products USING btree (supplier_id, external_product_id);
+
+
+--
+-- Name: index_supplier_products_on_supplier_id_and_product_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_products_on_supplier_id_and_product_id ON public.supplier_products USING btree (supplier_id, product_id);
+
+
+--
+-- Name: index_supplier_variants_on_latest_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_variants_on_latest_observation_id ON public.supplier_variants USING btree (latest_observation_id);
+
+
+--
+-- Name: index_supplier_variants_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_variants_on_product_variant_id ON public.supplier_variants USING btree (product_variant_id);
+
+
+--
+-- Name: index_supplier_variants_on_supplier_id_and_external_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_variants_on_supplier_id_and_external_variant_id ON public.supplier_variants USING btree (supplier_id, external_variant_id);
+
+
+--
+-- Name: index_supplier_variants_on_supplier_id_and_product_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_supplier_variants_on_supplier_id_and_product_variant_id ON public.supplier_variants USING btree (supplier_id, product_variant_id);
+
+
+--
+-- Name: index_supplier_variants_on_supplier_product_id_and_supplier_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_supplier_variants_on_supplier_product_id_and_supplier_id ON public.supplier_variants USING btree (supplier_product_id, supplier_id);
+
+
+--
+-- Name: index_suppliers_on_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_suppliers_on_key ON public.suppliers USING btree (key);
 
 
 --
@@ -731,11 +1352,27 @@ ALTER TABLE ONLY public.ai_access_grants
 
 
 --
+-- Name: products fk_products_primary_category_membership; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.products
+    ADD CONSTRAINT fk_products_primary_category_membership FOREIGN KEY (id, primary_category_id) REFERENCES public.product_categories(product_id, category_id) DEFERRABLE INITIALLY DEFERRED;
+
+
+--
 -- Name: agent_provider_sessions fk_provider_sessions_grant_session; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.agent_provider_sessions
     ADD CONSTRAINT fk_provider_sessions_grant_session FOREIGN KEY (ai_access_grant_id, shopping_session_id) REFERENCES public.ai_access_grants(id, shopping_session_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: product_categories fk_rails_005b71ca83; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_categories
+    ADD CONSTRAINT fk_rails_005b71ca83 FOREIGN KEY (category_id) REFERENCES public.categories(id) ON DELETE RESTRICT;
 
 
 --
@@ -771,6 +1408,78 @@ ALTER TABLE ONLY public.external_identities
 
 
 --
+-- Name: supplier_variants fk_rails_5d945c4b38; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_variants
+    ADD CONSTRAINT fk_rails_5d945c4b38 FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: supplier_variants fk_rails_78f4694af5; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_variants
+    ADD CONSTRAINT fk_rails_78f4694af5 FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: categories fk_rails_82f48f7407; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categories
+    ADD CONSTRAINT fk_rails_82f48f7407 FOREIGN KEY (parent_id) REFERENCES public.categories(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: supplier_products fk_rails_8e1c65b71a; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_products
+    ADD CONSTRAINT fk_rails_8e1c65b71a FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: product_categories fk_rails_98a9a32a41; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_categories
+    ADD CONSTRAINT fk_rails_98a9a32a41 FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+
+
+--
+-- Name: supplier_products fk_rails_9a363579c5; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_products
+    ADD CONSTRAINT fk_rails_9a363579c5 FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: supplier_warehouses fk_rails_b6502f29ac; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_warehouses
+    ADD CONSTRAINT fk_rails_b6502f29ac FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: products fk_rails_c98cb91966; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.products
+    ADD CONSTRAINT fk_rails_c98cb91966 FOREIGN KEY (primary_category_id) REFERENCES public.categories(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: product_variants fk_rails_dae52f850b; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_variants
+    ADD CONSTRAINT fk_rails_dae52f850b FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+
+
+--
 -- Name: shopping_sessions fk_rails_de779ffa76; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -787,11 +1496,20 @@ ALTER TABLE ONLY public.turnstile_verifications
 
 
 --
+-- Name: supplier_variants fk_supplier_variants_product_supplier; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.supplier_variants
+    ADD CONSTRAINT fk_supplier_variants_product_supplier FOREIGN KEY (supplier_product_id, supplier_id) REFERENCES public.supplier_products(id, supplier_id) ON DELETE RESTRICT;
+
+
+--
 -- PostgreSQL database dump complete
 --
 
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
+('20260920000003'),
 ('20260920000002'),
 ('20260920000001');
