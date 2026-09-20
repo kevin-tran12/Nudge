@@ -16,9 +16,18 @@ Rails.application.configure do
     policy.style_src   :self
     policy.script_src  :self,
       "https://unpkg.com" # ELEVENLABS-SPECIFIC: removable — serves the ElevenLabs Convai widget embed script.
+    # ELEVENLABS-SPECIFIC: removable — the conversation token is a LiveKit room
+    # token, so the widget negotiates realtime audio against LiveKit rather than
+    # against api.elevenlabs.io alone. Audio worklets and captured media are
+    # delivered as blob URLs.
     policy.connect_src :self,
-      "https://api.elevenlabs.io", # ELEVENLABS-SPECIFIC: removable — ElevenLabs REST calls made from the browser widget.
-      "wss://api.elevenlabs.io"    # ELEVENLABS-SPECIFIC: removable — ElevenLabs realtime conversation transport.
+      "https://api.elevenlabs.io",
+      "wss://api.elevenlabs.io",
+      "https://*.livekit.cloud",
+      "wss://*.livekit.cloud",
+      :blob
+    policy.worker_src  :self, :blob # ELEVENLABS-SPECIFIC: removable — audio worklet workers.
+    policy.media_src   :self, :blob # ELEVENLABS-SPECIFIC: removable — realtime audio playback.
   end
 
   # Generate a fresh per-request nonce for scripts (including importmap/inline

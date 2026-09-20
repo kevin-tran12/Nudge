@@ -92,6 +92,8 @@ module Agents
       consent = ensure_demo_consent!(shopping_session)
       verification = ensure_demo_verification!(shopping_session, expected_hostname)
 
+      revoke_active_grants!(shopping_session)
+
       grant_result = @issuer.call(
         shopping_session: shopping_session,
         disclosure_policy_version: consent.policy_version,
@@ -114,6 +116,23 @@ module Agents
     end
 
     private
+
+    # A grant's raw bearer token is returned exactly once and only its digest is
+    # stored, so an interrupted attempt -- a dismissed microphone prompt, a reload,
+    # a dropped connection -- leaves an active grant whose token nobody holds. The
+    # issuer then correctly refuses to mint a second one, and the visitor is locked
+    # out for the full grant lifetime with no way to recover.
+    #
+    # Pressing the button again is an explicit re-authorization, so retire the
+    # unusable grant first. The issuer's one-active-grant invariant is preserved:
+    # the old grant is expired before a new one exists, under the session lock.
+    def revoke_active_grants!(shopping_session)
+      shopping_session.with_lock do
+        shopping_session.ai_access_grants.where(status: "active").find_each do |grant|
+          grant.update!(status: "expired")
+        end
+      end
+    end
 
     def refuse_outside_demo_deployment!
       raise Error.new(:demo_mode_unavailable), cause: nil unless NON_PRODUCTION_DEPLOYMENTS.include?(@deployment)

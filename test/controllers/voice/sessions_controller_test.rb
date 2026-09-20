@@ -47,8 +47,12 @@ class Voice::SessionsControllerTest < ActionDispatch::IntegrationTest
       post "/voice/session"
     end
     assert_equal first_session_count, ShoppingSession.count
-    assert_response :conflict
-    assert_equal "grant_conflict", response.parsed_body.fetch("error")
+
+    # Re-authorizing must succeed rather than conflict. The first grant's raw
+    # token is unrecoverable, so refusing here would lock the visitor out for
+    # the whole grant lifetime.
+    assert_response :created
+    assert response.parsed_body.fetch("grant_token").present?
   end
 
   test "no request parameter header or body field can select an existing session" do
@@ -64,10 +68,15 @@ class Voice::SessionsControllerTest < ActionDispatch::IntegrationTest
   end
 
   test "never leaks internals on refusal" do
-    post "/voice/session"
+    # Drive a genuine refusal: without a configured agent the provider boundary
+    # cannot issue an authorization.
+    Rails.application.config.x.eleven_labs = Integrations::ElevenLabs::Config.new(
+      api_key: nil, agent_id: nil, tool_secret: nil, webhook_secret: nil, mode: "fixture"
+    )
+
     post "/voice/session"
 
-    assert_response :conflict
+    assert_response :service_unavailable
     body = response.parsed_body
     assert_equal [ "error" ], body.keys
     refute_includes response.body, "Identity::"
