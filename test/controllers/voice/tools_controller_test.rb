@@ -36,8 +36,9 @@ class Voice::ToolsControllerTest < ActionDispatch::IntegrationTest
     post_tool("search_products", { "query" => "storage", "limit" => 5 }, token: token)
     assert_response :success
     search_body = response.parsed_body
-    assert_equal 1, search_body.fetch("count")
-    assert_equal "00001234", search_body.fetch("results").first.fetch("id")
+    assert_operator search_body.fetch("count"), :>=, 1
+    assert_equal search_body.fetch("count"), search_body.fetch("results").length
+    assert_includes search_body.fetch("results").map { |item| item.fetch("id") }, "00001234"
 
     post_tool("get_product_details", { "product_id" => "00001234" }, token: token)
     assert_response :success

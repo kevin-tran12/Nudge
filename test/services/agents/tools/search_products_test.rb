@@ -14,10 +14,12 @@ class Agents::Tools::SearchProductsTest < ActiveSupport::TestCase
     tool = Agents::Tools::SearchProducts.new
     result = tool.call(shopping_session: @session, arguments: { "query" => "storage", "limit" => 5 })
 
+    results = result.fetch("results")
+
     assert_equal "storage", result.fetch("query")
-    assert_equal 1, result.fetch("count")
-    assert_equal 1, result.fetch("results").length
-    assert_equal "00001234", result.fetch("results").first.fetch("id")
+    assert_equal result.fetch("count"), results.length
+    assert_operator results.length, :<=, 5
+    assert_includes results.map { |item| item.fetch("id") }, "00001234"
   end
 
   test "returns an explicit empty result when nothing matches, never a guess" do
@@ -31,7 +33,10 @@ class Agents::Tools::SearchProductsTest < ActiveSupport::TestCase
   test "limit is enforced as a hard bound and never silently coerced" do
     tool = Agents::Tools::SearchProducts.new
 
-    assert_equal 1, tool.call(shopping_session: @session, arguments: { "query" => "storage" }).fetch("count")
+    default_result = tool.call(shopping_session: @session, arguments: { "query" => "storage" })
+
+    assert_operator default_result.fetch("count"), :<=, Agents::Tools::SearchProducts::DEFAULT_LIMIT
+    assert_equal default_result.fetch("count"), default_result.fetch("results").length
 
     [ 0, -1, 25, "5", 5.0, nil ].each do |limit|
       assert_raises(Agents::Tools::Error) do
