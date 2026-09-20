@@ -254,6 +254,115 @@ ALTER SEQUENCE public.agent_provider_sessions_id_seq OWNED BY public.agent_provi
 
 
 --
+-- Name: agent_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_runs (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    shopping_session_id bigint NOT NULL,
+    ai_access_grant_id bigint,
+    agent_provider_session_id bigint,
+    correlation_id uuid NOT NULL,
+    status text DEFAULT 'queued'::text NOT NULL,
+    provider text NOT NULL,
+    model_ref text,
+    input_tokens integer,
+    output_tokens integer,
+    cost_microunits bigint,
+    latency_ms integer,
+    started_at timestamp(6) with time zone,
+    completed_at timestamp(6) with time zone,
+    lease_owner text,
+    lease_token uuid,
+    lease_expires_at timestamp(6) with time zone,
+    purge_after timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT agent_runs_completion_check CHECK (((completed_at IS NULL) OR (started_at IS NULL) OR (completed_at >= started_at))),
+    CONSTRAINT agent_runs_cost_check CHECK (((cost_microunits IS NULL) OR (cost_microunits >= 0))),
+    CONSTRAINT agent_runs_input_tokens_check CHECK (((input_tokens IS NULL) OR (input_tokens >= 0))),
+    CONSTRAINT agent_runs_latency_check CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))),
+    CONSTRAINT agent_runs_lease_pair_check CHECK ((((lease_owner IS NULL) AND (lease_token IS NULL) AND (lease_expires_at IS NULL)) OR ((lease_owner IS NOT NULL) AND (lease_token IS NOT NULL) AND (lease_expires_at IS NOT NULL)))),
+    CONSTRAINT agent_runs_output_tokens_check CHECK (((output_tokens IS NULL) OR (output_tokens >= 0))),
+    CONSTRAINT agent_runs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text, 'terminated'::text])))
+);
+
+
+--
+-- Name: agent_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.agent_runs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: agent_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.agent_runs_id_seq OWNED BY public.agent_runs.id;
+
+
+--
+-- Name: agent_tool_calls; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.agent_tool_calls (
+    id bigint NOT NULL,
+    agent_run_id bigint NOT NULL,
+    sequence bigint NOT NULL,
+    tool_name text NOT NULL,
+    tool_version text NOT NULL,
+    request_hash bytea NOT NULL,
+    input_projection jsonb DEFAULT '{}'::jsonb NOT NULL,
+    input_schema_version smallint NOT NULL,
+    output_projection jsonb,
+    output_schema_version smallint,
+    authorization_result text NOT NULL,
+    idempotency_key text,
+    status text NOT NULL,
+    error_code text,
+    started_at timestamp(6) with time zone NOT NULL,
+    completed_at timestamp(6) with time zone,
+    purge_after timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT agent_tool_calls_completion_check CHECK (((completed_at IS NULL) OR (completed_at >= started_at))),
+    CONSTRAINT agent_tool_calls_input_object_check CHECK ((jsonb_typeof(input_projection) = 'object'::text)),
+    CONSTRAINT agent_tool_calls_input_version_check CHECK ((input_schema_version > 0)),
+    CONSTRAINT agent_tool_calls_output_object_check CHECK (((output_projection IS NULL) OR (jsonb_typeof(output_projection) = 'object'::text))),
+    CONSTRAINT agent_tool_calls_output_pair_check CHECK (((output_projection IS NULL) = (output_schema_version IS NULL))),
+    CONSTRAINT agent_tool_calls_output_version_check CHECK (((output_schema_version IS NULL) OR (output_schema_version > 0))),
+    CONSTRAINT agent_tool_calls_request_hash_check CHECK ((octet_length(request_hash) = 32)),
+    CONSTRAINT agent_tool_calls_sequence_check CHECK ((sequence > 0))
+);
+
+
+--
+-- Name: agent_tool_calls_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.agent_tool_calls_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: agent_tool_calls_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.agent_tool_calls_id_seq OWNED BY public.agent_tool_calls.id;
+
+
+--
 -- Name: ai_access_grants; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -404,6 +513,52 @@ ALTER SEQUENCE public.categories_id_seq OWNED BY public.categories.id;
 
 
 --
+-- Name: clarification_decisions; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.clarification_decisions (
+    id bigint NOT NULL,
+    shopping_session_id bigint NOT NULL,
+    recommendation_run_id bigint,
+    requirement_id bigint,
+    candidate_reduction numeric(8,6) NOT NULL,
+    importance numeric(8,6) NOT NULL,
+    answerability numeric(8,6) NOT NULL,
+    interaction_cost numeric(8,6) NOT NULL,
+    computed_value numeric(12,6) NOT NULL,
+    policy_version text NOT NULL,
+    reason_code text NOT NULL,
+    selected_message_id bigint,
+    skipped_reason text,
+    created_at timestamp(6) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT clarification_decisions_answerability_check CHECK (((answerability >= (0)::numeric) AND (answerability <= (1)::numeric))),
+    CONSTRAINT clarification_decisions_candidate_reduction_check CHECK (((candidate_reduction >= (0)::numeric) AND (candidate_reduction <= (1)::numeric))),
+    CONSTRAINT clarification_decisions_importance_check CHECK (((importance >= (0)::numeric) AND (importance <= (1)::numeric))),
+    CONSTRAINT clarification_decisions_interaction_cost_check CHECK (((interaction_cost >= (0)::numeric) AND (interaction_cost <= (1)::numeric))),
+    CONSTRAINT clarification_decisions_selection_pair_check CHECK (((selected_message_id IS NULL) OR (skipped_reason IS NULL)))
+);
+
+
+--
+-- Name: clarification_decisions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.clarification_decisions_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: clarification_decisions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.clarification_decisions_id_seq OWNED BY public.clarification_decisions.id;
+
+
+--
 -- Name: consent_records; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -449,36 +604,29 @@ ALTER SEQUENCE public.consent_records_id_seq OWNED BY public.consent_records.id;
 
 
 --
--- Name: embedding_models; Type: TABLE; Schema: public; Owner: -
+-- Name: eligibility_results; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.embedding_models (
+CREATE TABLE public.eligibility_results (
     id bigint NOT NULL,
-    provider text NOT NULL,
-    key text NOT NULL,
-    model_revision text NOT NULL,
-    dimensions integer NOT NULL,
-    distance_metric text NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
-    configuration_hash bytea NOT NULL,
-    activated_at timestamp(6) with time zone,
-    retired_at timestamp(6) with time zone,
-    created_at timestamp(6) with time zone NOT NULL,
-    updated_at timestamp(6) with time zone NOT NULL,
-    CONSTRAINT embedding_models_configuration_hash_check CHECK ((octet_length(configuration_hash) = 32)),
-    CONSTRAINT embedding_models_dimensions_check CHECK ((dimensions > 0)),
-    CONSTRAINT embedding_models_distance_metric_check CHECK ((distance_metric = ANY (ARRAY['cosine'::text, 'l2'::text, 'inner_product'::text]))),
-    CONSTRAINT embedding_models_retirement_after_activation_check CHECK (((activated_at IS NULL) OR (retired_at IS NULL) OR (retired_at >= activated_at))),
-    CONSTRAINT embedding_models_retirement_state_check CHECK (((status = 'retired'::text) = (retired_at IS NOT NULL))),
-    CONSTRAINT embedding_models_status_check CHECK ((status = ANY (ARRAY['active'::text, 'retired'::text])))
+    recommendation_candidate_id bigint NOT NULL,
+    requirement_id bigint NOT NULL,
+    outcome text NOT NULL,
+    product_fact_id bigint,
+    evaluator_version text NOT NULL,
+    policy_version text NOT NULL,
+    reason_code text NOT NULL,
+    evaluated_at timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT eligibility_results_outcome_check CHECK ((outcome = ANY (ARRAY['pass'::text, 'fail'::text, 'unknown'::text])))
 );
 
 
 --
--- Name: embedding_models_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: eligibility_results_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
-CREATE SEQUENCE public.embedding_models_id_seq
+CREATE SEQUENCE public.eligibility_results_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -487,52 +635,10 @@ CREATE SEQUENCE public.embedding_models_id_seq
 
 
 --
--- Name: embedding_models_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: eligibility_results_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.embedding_models_id_seq OWNED BY public.embedding_models.id;
-
-
---
--- Name: embeddings; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.embeddings (
-    id bigint NOT NULL,
-    search_document_id bigint NOT NULL,
-    embedding_model_id bigint NOT NULL,
-    value public.vector NOT NULL,
-    dimensions integer NOT NULL,
-    content_hash bytea NOT NULL,
-    generated_at timestamp(6) with time zone NOT NULL,
-    status text DEFAULT 'active'::text NOT NULL,
-    error_code text,
-    created_at timestamp(6) with time zone NOT NULL,
-    updated_at timestamp(6) with time zone NOT NULL,
-    CONSTRAINT embeddings_content_hash_check CHECK ((octet_length(content_hash) = 32)),
-    CONSTRAINT embeddings_dimension_check CHECK (((dimensions > 0) AND (public.vector_dims(value) = dimensions))),
-    CONSTRAINT embeddings_error_state_check CHECK (((status = 'failed'::text) = (error_code IS NOT NULL))),
-    CONSTRAINT embeddings_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'superseded'::text, 'failed'::text])))
-);
-
-
---
--- Name: embeddings_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.embeddings_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: embeddings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.embeddings_id_seq OWNED BY public.embeddings.id;
+ALTER SEQUENCE public.eligibility_results_id_seq OWNED BY public.eligibility_results.id;
 
 
 --
@@ -900,6 +1006,201 @@ ALTER SEQUENCE public.products_id_seq OWNED BY public.products.id;
 
 
 --
+-- Name: recommendation_candidates; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.recommendation_candidates (
+    id bigint NOT NULL,
+    recommendation_run_id bigint NOT NULL,
+    product_id bigint NOT NULL,
+    product_variant_id bigint,
+    retrieval_source text NOT NULL,
+    retrieval_rank integer NOT NULL,
+    lexical_score numeric(12,6),
+    semantic_score numeric(12,6),
+    soft_score numeric(12,6),
+    final_eligibility text NOT NULL,
+    final_rank integer,
+    included boolean DEFAULT false NOT NULL,
+    reason_code text NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT recommendation_candidates_eligibility_check CHECK ((final_eligibility = ANY (ARRAY['pass'::text, 'fail'::text, 'unknown'::text]))),
+    CONSTRAINT recommendation_candidates_final_rank_check CHECK (((final_rank IS NULL) OR (final_rank > 0))),
+    CONSTRAINT recommendation_candidates_retrieval_rank_check CHECK ((retrieval_rank > 0))
+);
+
+
+--
+-- Name: recommendation_candidates_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.recommendation_candidates_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: recommendation_candidates_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.recommendation_candidates_id_seq OWNED BY public.recommendation_candidates.id;
+
+
+--
+-- Name: recommendation_evidence; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.recommendation_evidence (
+    id bigint NOT NULL,
+    recommendation_candidate_id bigint NOT NULL,
+    product_fact_id bigint,
+    price_observation_id bigint,
+    inventory_observation_id bigint,
+    supplier_observation_id bigint,
+    freshness_at timestamp(6) with time zone NOT NULL,
+    display_excerpt text,
+    created_at timestamp(6) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT recommendation_evidence_subject_check CHECK ((num_nonnulls(product_fact_id, price_observation_id, inventory_observation_id, supplier_observation_id) = 1))
+);
+
+
+--
+-- Name: recommendation_evidence_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.recommendation_evidence_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: recommendation_evidence_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.recommendation_evidence_id_seq OWNED BY public.recommendation_evidence.id;
+
+
+--
+-- Name: recommendation_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.recommendation_runs (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    shopping_session_id bigint NOT NULL,
+    requirement_set_hash bytea NOT NULL,
+    search_policy_version text NOT NULL,
+    status text DEFAULT 'queued'::text NOT NULL,
+    started_at timestamp(6) with time zone,
+    completed_at timestamp(6) with time zone,
+    query_limit integer NOT NULL,
+    candidate_limit integer NOT NULL,
+    result_summary jsonb DEFAULT '{}'::jsonb NOT NULL,
+    result_schema_version smallint NOT NULL,
+    no_result_reason text,
+    history_influenced boolean DEFAULT false NOT NULL,
+    latency_ms integer,
+    cost_microunits bigint,
+    lease_owner text,
+    lease_token uuid,
+    lease_expires_at timestamp(6) with time zone,
+    purge_after timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT recommendation_runs_candidate_limit_check CHECK ((candidate_limit > 0)),
+    CONSTRAINT recommendation_runs_completion_check CHECK (((completed_at IS NULL) OR (started_at IS NULL) OR (completed_at >= started_at))),
+    CONSTRAINT recommendation_runs_cost_check CHECK (((cost_microunits IS NULL) OR (cost_microunits >= 0))),
+    CONSTRAINT recommendation_runs_hash_length_check CHECK ((octet_length(requirement_set_hash) = 32)),
+    CONSTRAINT recommendation_runs_latency_check CHECK (((latency_ms IS NULL) OR (latency_ms >= 0))),
+    CONSTRAINT recommendation_runs_lease_pair_check CHECK ((((lease_owner IS NULL) AND (lease_token IS NULL) AND (lease_expires_at IS NULL)) OR ((lease_owner IS NOT NULL) AND (lease_token IS NOT NULL) AND (lease_expires_at IS NOT NULL)))),
+    CONSTRAINT recommendation_runs_query_limit_check CHECK ((query_limit > 0)),
+    CONSTRAINT recommendation_runs_result_object_check CHECK ((jsonb_typeof(result_summary) = 'object'::text)),
+    CONSTRAINT recommendation_runs_result_version_check CHECK ((result_schema_version > 0)),
+    CONSTRAINT recommendation_runs_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'succeeded'::text, 'no_result'::text, 'failed'::text, 'cancelled'::text])))
+);
+
+
+--
+-- Name: recommendation_runs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.recommendation_runs_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: recommendation_runs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.recommendation_runs_id_seq OWNED BY public.recommendation_runs.id;
+
+
+--
+-- Name: requirements; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.requirements (
+    id bigint NOT NULL,
+    public_id uuid DEFAULT gen_random_uuid() NOT NULL,
+    shopping_session_id bigint NOT NULL,
+    requirement_key text NOT NULL,
+    operator text NOT NULL,
+    kind text NOT NULL,
+    value_json jsonb NOT NULL,
+    value_schema_version smallint NOT NULL,
+    source text NOT NULL,
+    confidence numeric(8,6) NOT NULL,
+    importance numeric(8,6) NOT NULL,
+    needs_clarification boolean DEFAULT false NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    originating_message_id bigint,
+    originating_tool_call_id bigint,
+    supersedes_requirement_id bigint,
+    confirmed_at timestamp(6) with time zone,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT requirements_confidence_check CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric))),
+    CONSTRAINT requirements_importance_check CHECK (((importance >= (0)::numeric) AND (importance <= (1)::numeric))),
+    CONSTRAINT requirements_kind_check CHECK ((kind = ANY (ARRAY['hard'::text, 'soft'::text]))),
+    CONSTRAINT requirements_not_self_superseding_check CHECK (((supersedes_requirement_id IS NULL) OR (supersedes_requirement_id <> id))),
+    CONSTRAINT requirements_source_check CHECK ((source = ANY (ARRAY['user_explicit'::text, 'user_inferred'::text, 'system_derived'::text, 'history_soft'::text]))),
+    CONSTRAINT requirements_status_check CHECK ((status = ANY (ARRAY['active'::text, 'rejected'::text, 'superseded'::text]))),
+    CONSTRAINT requirements_value_json_object_check CHECK ((jsonb_typeof(value_json) = 'object'::text)),
+    CONSTRAINT requirements_value_schema_version_check CHECK ((value_schema_version > 0))
+);
+
+
+--
+-- Name: requirements_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.requirements_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: requirements_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.requirements_id_seq OWNED BY public.requirements.id;
+
+
+--
 -- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -909,34 +1210,39 @@ CREATE TABLE public.schema_migrations (
 
 
 --
--- Name: search_documents; Type: TABLE; Schema: public; Owner: -
+-- Name: shopping_messages; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.search_documents (
+CREATE TABLE public.shopping_messages (
     id bigint NOT NULL,
-    product_id bigint,
-    product_variant_id bigint,
-    document_kind text NOT NULL,
-    locale text DEFAULT 'en'::text NOT NULL,
-    normalized_text text NOT NULL,
-    content_hash bytea NOT NULL,
-    source_version text NOT NULL,
-    status text NOT NULL,
-    generated_at timestamp(6) with time zone NOT NULL,
-    created_at timestamp(6) with time zone NOT NULL,
-    updated_at timestamp(6) with time zone NOT NULL,
-    search_vector tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, normalized_text)) STORED,
-    CONSTRAINT search_documents_content_hash_check CHECK ((octet_length(content_hash) = 32)),
-    CONSTRAINT search_documents_status_check CHECK ((status = ANY (ARRAY['active'::text, 'superseded'::text]))),
-    CONSTRAINT search_documents_subject_check CHECK ((num_nonnulls(product_id, product_variant_id) = 1))
+    shopping_session_id bigint NOT NULL,
+    ai_access_grant_id bigint,
+    role text NOT NULL,
+    source text NOT NULL,
+    text_ciphertext text,
+    redacted_text text,
+    provider_message_ref_digest bytea,
+    digest_key_version smallint,
+    sequence bigint NOT NULL,
+    occurred_at timestamp(6) with time zone NOT NULL,
+    purge_after timestamp(6) with time zone NOT NULL,
+    safety_status text DEFAULT 'unchecked'::text NOT NULL,
+    redaction_status text DEFAULT 'pending'::text NOT NULL,
+    created_at timestamp(6) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT shopping_messages_digest_key_version_check CHECK (((digest_key_version IS NULL) OR (digest_key_version > 0))),
+    CONSTRAINT shopping_messages_digest_length_check CHECK (((provider_message_ref_digest IS NULL) OR (octet_length(provider_message_ref_digest) = 32))),
+    CONSTRAINT shopping_messages_digest_pair_check CHECK (((provider_message_ref_digest IS NULL) = (digest_key_version IS NULL))),
+    CONSTRAINT shopping_messages_purge_deadline_check CHECK ((purge_after >= occurred_at)),
+    CONSTRAINT shopping_messages_role_check CHECK ((role = ANY (ARRAY['user'::text, 'agent'::text, 'system_event'::text]))),
+    CONSTRAINT shopping_messages_sequence_check CHECK ((sequence > 0))
 );
 
 
 --
--- Name: search_documents_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: shopping_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
 --
 
-CREATE SEQUENCE public.search_documents_id_seq
+CREATE SEQUENCE public.shopping_messages_id_seq
     START WITH 1
     INCREMENT BY 1
     NO MINVALUE
@@ -945,10 +1251,10 @@ CREATE SEQUENCE public.search_documents_id_seq
 
 
 --
--- Name: search_documents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: shopping_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 --
 
-ALTER SEQUENCE public.search_documents_id_seq OWNED BY public.search_documents.id;
+ALTER SEQUENCE public.shopping_messages_id_seq OWNED BY public.shopping_messages.id;
 
 
 --
@@ -1458,6 +1764,20 @@ ALTER TABLE ONLY public.agent_provider_sessions ALTER COLUMN id SET DEFAULT next
 
 
 --
+-- Name: agent_runs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs ALTER COLUMN id SET DEFAULT nextval('public.agent_runs_id_seq'::regclass);
+
+
+--
+-- Name: agent_tool_calls id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_tool_calls ALTER COLUMN id SET DEFAULT nextval('public.agent_tool_calls_id_seq'::regclass);
+
+
+--
 -- Name: ai_access_grants id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1479,6 +1799,13 @@ ALTER TABLE ONLY public.categories ALTER COLUMN id SET DEFAULT nextval('public.c
 
 
 --
+-- Name: clarification_decisions id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clarification_decisions ALTER COLUMN id SET DEFAULT nextval('public.clarification_decisions_id_seq'::regclass);
+
+
+--
 -- Name: consent_records id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1486,17 +1813,10 @@ ALTER TABLE ONLY public.consent_records ALTER COLUMN id SET DEFAULT nextval('pub
 
 
 --
--- Name: embedding_models id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: eligibility_results id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.embedding_models ALTER COLUMN id SET DEFAULT nextval('public.embedding_models_id_seq'::regclass);
-
-
---
--- Name: embeddings id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.embeddings ALTER COLUMN id SET DEFAULT nextval('public.embeddings_id_seq'::regclass);
+ALTER TABLE ONLY public.eligibility_results ALTER COLUMN id SET DEFAULT nextval('public.eligibility_results_id_seq'::regclass);
 
 
 --
@@ -1556,10 +1876,38 @@ ALTER TABLE ONLY public.products ALTER COLUMN id SET DEFAULT nextval('public.pro
 
 
 --
--- Name: search_documents id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: recommendation_candidates id; Type: DEFAULT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.search_documents ALTER COLUMN id SET DEFAULT nextval('public.search_documents_id_seq'::regclass);
+ALTER TABLE ONLY public.recommendation_candidates ALTER COLUMN id SET DEFAULT nextval('public.recommendation_candidates_id_seq'::regclass);
+
+
+--
+-- Name: recommendation_evidence id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_evidence ALTER COLUMN id SET DEFAULT nextval('public.recommendation_evidence_id_seq'::regclass);
+
+
+--
+-- Name: recommendation_runs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_runs ALTER COLUMN id SET DEFAULT nextval('public.recommendation_runs_id_seq'::regclass);
+
+
+--
+-- Name: requirements id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.requirements ALTER COLUMN id SET DEFAULT nextval('public.requirements_id_seq'::regclass);
+
+
+--
+-- Name: shopping_messages id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.shopping_messages ALTER COLUMN id SET DEFAULT nextval('public.shopping_messages_id_seq'::regclass);
 
 
 --
@@ -1648,6 +1996,22 @@ ALTER TABLE ONLY public.agent_provider_sessions
 
 
 --
+-- Name: agent_runs agent_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs
+    ADD CONSTRAINT agent_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: agent_tool_calls agent_tool_calls_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_tool_calls
+    ADD CONSTRAINT agent_tool_calls_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: ai_access_grants ai_access_grants_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1680,6 +2044,14 @@ ALTER TABLE ONLY public.categories
 
 
 --
+-- Name: clarification_decisions clarification_decisions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clarification_decisions
+    ADD CONSTRAINT clarification_decisions_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: consent_records consent_records_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1688,19 +2060,11 @@ ALTER TABLE ONLY public.consent_records
 
 
 --
--- Name: embedding_models embedding_models_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: eligibility_results eligibility_results_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.embedding_models
-    ADD CONSTRAINT embedding_models_pkey PRIMARY KEY (id);
-
-
---
--- Name: embeddings embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.embeddings
-    ADD CONSTRAINT embeddings_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.eligibility_results
+    ADD CONSTRAINT eligibility_results_pkey PRIMARY KEY (id);
 
 
 --
@@ -1768,6 +2132,38 @@ ALTER TABLE ONLY public.products
 
 
 --
+-- Name: recommendation_candidates recommendation_candidates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_candidates
+    ADD CONSTRAINT recommendation_candidates_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: recommendation_evidence recommendation_evidence_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_evidence
+    ADD CONSTRAINT recommendation_evidence_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: recommendation_runs recommendation_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_runs
+    ADD CONSTRAINT recommendation_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: requirements requirements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.requirements
+    ADD CONSTRAINT requirements_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1776,11 +2172,11 @@ ALTER TABLE ONLY public.schema_migrations
 
 
 --
--- Name: search_documents search_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: shopping_messages shopping_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.search_documents
-    ADD CONSTRAINT search_documents_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.shopping_messages
+    ADD CONSTRAINT shopping_messages_pkey PRIMARY KEY (id);
 
 
 --
@@ -1942,10 +2338,80 @@ CREATE UNIQUE INDEX index_agent_provider_sessions_on_encryption_context ON publi
 
 
 --
+-- Name: index_agent_provider_sessions_on_id_and_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_agent_provider_sessions_on_id_and_session ON public.agent_provider_sessions USING btree (id, shopping_session_id);
+
+
+--
 -- Name: index_agent_provider_sessions_on_provider_ref; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX index_agent_provider_sessions_on_provider_ref ON public.agent_provider_sessions USING btree (provider, digest_key_version, provider_session_ref_digest) WHERE (provider_session_ref_digest IS NOT NULL);
+
+
+--
+-- Name: index_agent_runs_on_active_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_agent_runs_on_active_session ON public.agent_runs USING btree (shopping_session_id) WHERE (status = ANY (ARRAY['queued'::text, 'running'::text]));
+
+
+--
+-- Name: index_agent_runs_on_correlation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_agent_runs_on_correlation_id ON public.agent_runs USING btree (correlation_id);
+
+
+--
+-- Name: index_agent_runs_on_grant_and_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_agent_runs_on_grant_and_session ON public.agent_runs USING btree (ai_access_grant_id, shopping_session_id);
+
+
+--
+-- Name: index_agent_runs_on_provider_session_and_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_agent_runs_on_provider_session_and_session ON public.agent_runs USING btree (agent_provider_session_id, shopping_session_id);
+
+
+--
+-- Name: index_agent_runs_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_agent_runs_on_public_id ON public.agent_runs USING btree (public_id);
+
+
+--
+-- Name: index_agent_runs_on_purge_after; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_agent_runs_on_purge_after ON public.agent_runs USING btree (purge_after);
+
+
+--
+-- Name: index_agent_tool_calls_on_purge_after; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_agent_tool_calls_on_purge_after ON public.agent_tool_calls USING btree (purge_after);
+
+
+--
+-- Name: index_agent_tool_calls_on_run_idempotency; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_agent_tool_calls_on_run_idempotency ON public.agent_tool_calls USING btree (agent_run_id, idempotency_key) WHERE (idempotency_key IS NOT NULL);
+
+
+--
+-- Name: index_agent_tool_calls_on_run_sequence; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_agent_tool_calls_on_run_sequence ON public.agent_tool_calls USING btree (agent_run_id, sequence);
 
 
 --
@@ -2040,6 +2506,34 @@ CREATE UNIQUE INDEX index_categories_on_public_id ON public.categories USING btr
 
 
 --
+-- Name: index_clarification_decisions_on_recommendation_run_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_clarification_decisions_on_recommendation_run_id ON public.clarification_decisions USING btree (recommendation_run_id);
+
+
+--
+-- Name: index_clarification_decisions_on_requirement_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_clarification_decisions_on_requirement_id ON public.clarification_decisions USING btree (requirement_id);
+
+
+--
+-- Name: index_clarification_decisions_on_selected_message_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_clarification_decisions_on_selected_message_id ON public.clarification_decisions USING btree (selected_message_id);
+
+
+--
+-- Name: index_clarification_decisions_on_shopping_session_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_clarification_decisions_on_shopping_session_id ON public.clarification_decisions USING btree (shopping_session_id);
+
+
+--
 -- Name: index_consent_records_on_active_policy; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2075,38 +2569,24 @@ CREATE INDEX index_consent_records_on_user_id ON public.consent_records USING bt
 
 
 --
--- Name: index_embedding_models_identity; Type: INDEX; Schema: public; Owner: -
+-- Name: index_eligibility_results_on_product_fact_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX index_embedding_models_identity ON public.embedding_models USING btree (provider, key, model_revision, configuration_hash);
-
-
---
--- Name: index_embeddings_content_uniqueness; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX index_embeddings_content_uniqueness ON public.embeddings USING btree (search_document_id, embedding_model_id, content_hash);
+CREATE INDEX index_eligibility_results_on_product_fact_id ON public.eligibility_results USING btree (product_fact_id);
 
 
 --
--- Name: index_embeddings_on_embedding_model_id; Type: INDEX; Schema: public; Owner: -
+-- Name: index_eligibility_results_on_requirement_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_embeddings_on_embedding_model_id ON public.embeddings USING btree (embedding_model_id);
-
-
---
--- Name: index_embeddings_on_search_document_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_embeddings_on_search_document_id ON public.embeddings USING btree (search_document_id);
+CREATE INDEX index_eligibility_results_on_requirement_id ON public.eligibility_results USING btree (requirement_id);
 
 
 --
--- Name: index_embeddings_one_active_per_document_model; Type: INDEX; Schema: public; Owner: -
+-- Name: index_eligibility_results_unique_candidate_requirement; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX index_embeddings_one_active_per_document_model ON public.embeddings USING btree (search_document_id, embedding_model_id) WHERE (status = 'active'::text);
+CREATE UNIQUE INDEX index_eligibility_results_unique_candidate_requirement ON public.eligibility_results USING btree (recommendation_candidate_id, requirement_id);
 
 
 --
@@ -2292,24 +2772,143 @@ CREATE INDEX index_products_on_status ON public.products USING btree (status);
 
 
 --
--- Name: index_search_documents_active_search_vector; Type: INDEX; Schema: public; Owner: -
+-- Name: index_recommendation_candidates_on_product_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX index_search_documents_active_search_vector ON public.search_documents USING gin (search_vector) WHERE (status = 'active'::text);
-
-
---
--- Name: index_search_documents_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX index_search_documents_on_product_variant_id ON public.search_documents USING btree (product_variant_id);
+CREATE INDEX index_recommendation_candidates_on_product_id ON public.recommendation_candidates USING btree (product_id);
 
 
 --
--- Name: index_search_documents_subject_kind_locale_version; Type: INDEX; Schema: public; Owner: -
+-- Name: index_recommendation_candidates_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX index_search_documents_subject_kind_locale_version ON public.search_documents USING btree (product_id, product_variant_id, document_kind, locale, source_version);
+CREATE INDEX index_recommendation_candidates_on_product_variant_id ON public.recommendation_candidates USING btree (product_variant_id);
+
+
+--
+-- Name: index_recommendation_candidates_on_recommendation_run_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_recommendation_candidates_on_recommendation_run_id ON public.recommendation_candidates USING btree (recommendation_run_id);
+
+
+--
+-- Name: index_recommendation_candidates_unique_variant; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_recommendation_candidates_unique_variant ON public.recommendation_candidates USING btree (recommendation_run_id, product_id, COALESCE(product_variant_id, (0)::bigint));
+
+
+--
+-- Name: index_recommendation_evidence_on_inventory_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_recommendation_evidence_on_inventory_observation_id ON public.recommendation_evidence USING btree (inventory_observation_id);
+
+
+--
+-- Name: index_recommendation_evidence_on_price_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_recommendation_evidence_on_price_observation_id ON public.recommendation_evidence USING btree (price_observation_id);
+
+
+--
+-- Name: index_recommendation_evidence_on_product_fact_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_recommendation_evidence_on_product_fact_id ON public.recommendation_evidence USING btree (product_fact_id);
+
+
+--
+-- Name: index_recommendation_evidence_on_recommendation_candidate_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_recommendation_evidence_on_recommendation_candidate_id ON public.recommendation_evidence USING btree (recommendation_candidate_id);
+
+
+--
+-- Name: index_recommendation_evidence_on_supplier_observation_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_recommendation_evidence_on_supplier_observation_id ON public.recommendation_evidence USING btree (supplier_observation_id);
+
+
+--
+-- Name: index_recommendation_runs_on_active_session; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_recommendation_runs_on_active_session ON public.recommendation_runs USING btree (shopping_session_id) WHERE (status = ANY (ARRAY['queued'::text, 'running'::text]));
+
+
+--
+-- Name: index_recommendation_runs_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_recommendation_runs_on_public_id ON public.recommendation_runs USING btree (public_id);
+
+
+--
+-- Name: index_recommendation_runs_on_purge_after; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_recommendation_runs_on_purge_after ON public.recommendation_runs USING btree (purge_after);
+
+
+--
+-- Name: index_requirements_on_active_session_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_requirements_on_active_session_key ON public.requirements USING btree (shopping_session_id, requirement_key) WHERE (status = 'active'::text);
+
+
+--
+-- Name: index_requirements_on_originating_message_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_requirements_on_originating_message_id ON public.requirements USING btree (originating_message_id);
+
+
+--
+-- Name: index_requirements_on_originating_tool_call_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_requirements_on_originating_tool_call_id ON public.requirements USING btree (originating_tool_call_id);
+
+
+--
+-- Name: index_requirements_on_public_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_requirements_on_public_id ON public.requirements USING btree (public_id);
+
+
+--
+-- Name: index_requirements_on_supersedes_requirement_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_requirements_on_supersedes_requirement_id ON public.requirements USING btree (supersedes_requirement_id);
+
+
+--
+-- Name: index_shopping_messages_on_ai_access_grant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_shopping_messages_on_ai_access_grant_id ON public.shopping_messages USING btree (ai_access_grant_id);
+
+
+--
+-- Name: index_shopping_messages_on_purge_after; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_shopping_messages_on_purge_after ON public.shopping_messages USING btree (purge_after);
+
+
+--
+-- Name: index_shopping_messages_on_session_sequence; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_shopping_messages_on_session_sequence ON public.shopping_messages USING btree (shopping_session_id, sequence);
 
 
 --
@@ -2614,6 +3213,22 @@ CREATE TRIGGER db04_supplier_variants_latest_observation BEFORE INSERT OR UPDATE
 
 
 --
+-- Name: agent_runs fk_agent_runs_grant_session; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs
+    ADD CONSTRAINT fk_agent_runs_grant_session FOREIGN KEY (ai_access_grant_id, shopping_session_id) REFERENCES public.ai_access_grants(id, shopping_session_id) ON DELETE SET NULL (ai_access_grant_id);
+
+
+--
+-- Name: agent_runs fk_agent_runs_provider_session; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs
+    ADD CONSTRAINT fk_agent_runs_provider_session FOREIGN KEY (agent_provider_session_id, shopping_session_id) REFERENCES public.agent_provider_sessions(id, shopping_session_id) ON DELETE SET NULL (agent_provider_session_id);
+
+
+--
 -- Name: ai_access_grants fk_ai_grants_consent_session; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2710,6 +3325,14 @@ ALTER TABLE ONLY public.product_categories
 
 
 --
+-- Name: clarification_decisions fk_rails_02bacf8dee; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clarification_decisions
+    ADD CONSTRAINT fk_rails_02bacf8dee FOREIGN KEY (selected_message_id) REFERENCES public.shopping_messages(id) ON DELETE SET NULL;
+
+
+--
 -- Name: product_facts fk_rails_0cbcdb0a9b; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2734,11 +3357,43 @@ ALTER TABLE ONLY public.product_facts
 
 
 --
+-- Name: recommendation_candidates fk_rails_16732abeaf; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_candidates
+    ADD CONSTRAINT fk_rails_16732abeaf FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: consent_records fk_rails_18fd9dc44f; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.consent_records
     ADD CONSTRAINT fk_rails_18fd9dc44f FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: clarification_decisions fk_rails_1dc55f35e7; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clarification_decisions
+    ADD CONSTRAINT fk_rails_1dc55f35e7 FOREIGN KEY (recommendation_run_id) REFERENCES public.recommendation_runs(id) ON DELETE SET NULL;
+
+
+--
+-- Name: eligibility_results fk_rails_2027cc487e; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.eligibility_results
+    ADD CONSTRAINT fk_rails_2027cc487e FOREIGN KEY (requirement_id) REFERENCES public.requirements(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: eligibility_results fk_rails_2623e043ef; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.eligibility_results
+    ADD CONSTRAINT fk_rails_2623e043ef FOREIGN KEY (product_fact_id) REFERENCES public.product_facts(id) ON DELETE RESTRICT;
 
 
 --
@@ -2758,6 +3413,14 @@ ALTER TABLE ONLY public.catalog_media
 
 
 --
+-- Name: requirements fk_rails_3dad450e0f; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.requirements
+    ADD CONSTRAINT fk_rails_3dad450e0f FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE CASCADE;
+
+
+--
 -- Name: sync_checkpoints fk_rails_41cc8be07d; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2774,11 +3437,27 @@ ALTER TABLE ONLY public.external_identities
 
 
 --
+-- Name: shopping_messages fk_rails_50523c6e63; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.shopping_messages
+    ADD CONSTRAINT fk_rails_50523c6e63 FOREIGN KEY (ai_access_grant_id) REFERENCES public.ai_access_grants(id) ON DELETE SET NULL;
+
+
+--
 -- Name: supplier_variants fk_rails_5d945c4b38; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.supplier_variants
     ADD CONSTRAINT fk_rails_5d945c4b38 FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: agent_tool_calls fk_rails_637ac09801; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_tool_calls
+    ADD CONSTRAINT fk_rails_637ac09801 FOREIGN KEY (agent_run_id) REFERENCES public.agent_runs(id) ON DELETE CASCADE;
 
 
 --
@@ -2798,11 +3477,19 @@ ALTER TABLE ONLY public.product_facts
 
 
 --
--- Name: search_documents fk_rails_79ae37d1f3; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: recommendation_evidence fk_rails_79df78614f; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.search_documents
-    ADD CONSTRAINT fk_rails_79ae37d1f3 FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.recommendation_evidence
+    ADD CONSTRAINT fk_rails_79df78614f FOREIGN KEY (product_fact_id) REFERENCES public.product_facts(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: eligibility_results fk_rails_7cbd9f4e89; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.eligibility_results
+    ADD CONSTRAINT fk_rails_7cbd9f4e89 FOREIGN KEY (recommendation_candidate_id) REFERENCES public.recommendation_candidates(id) ON DELETE CASCADE;
 
 
 --
@@ -2814,11 +3501,35 @@ ALTER TABLE ONLY public.categories
 
 
 --
+-- Name: recommendation_runs fk_rails_844955e6ca; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_runs
+    ADD CONSTRAINT fk_rails_844955e6ca FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: recommendation_evidence fk_rails_88f140565e; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_evidence
+    ADD CONSTRAINT fk_rails_88f140565e FOREIGN KEY (inventory_observation_id) REFERENCES public.inventory_observations(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: supplier_products fk_rails_8e1c65b71a; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.supplier_products
     ADD CONSTRAINT fk_rails_8e1c65b71a FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: recommendation_evidence fk_rails_97ca525b9d; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_evidence
+    ADD CONSTRAINT fk_rails_97ca525b9d FOREIGN KEY (price_observation_id) REFERENCES public.price_observations(id) ON DELETE RESTRICT;
 
 
 --
@@ -2846,6 +3557,30 @@ ALTER TABLE ONLY public.supplier_products
 
 
 --
+-- Name: requirements fk_rails_9a8bc947ba; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.requirements
+    ADD CONSTRAINT fk_rails_9a8bc947ba FOREIGN KEY (originating_tool_call_id) REFERENCES public.agent_tool_calls(id) ON DELETE SET NULL;
+
+
+--
+-- Name: recommendation_evidence fk_rails_9a9cd2a966; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_evidence
+    ADD CONSTRAINT fk_rails_9a9cd2a966 FOREIGN KEY (recommendation_candidate_id) REFERENCES public.recommendation_candidates(id) ON DELETE CASCADE;
+
+
+--
+-- Name: recommendation_candidates fk_rails_a16d67cd28; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.recommendation_candidates
+    ADD CONSTRAINT fk_rails_a16d67cd28 FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: catalog_media fk_rails_a3f4d7937d; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2854,11 +3589,11 @@ ALTER TABLE ONLY public.catalog_media
 
 
 --
--- Name: embeddings fk_rails_a87a0137b4; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: recommendation_candidates fk_rails_a7a7423cb9; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.embeddings
-    ADD CONSTRAINT fk_rails_a87a0137b4 FOREIGN KEY (search_document_id) REFERENCES public.search_documents(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.recommendation_candidates
+    ADD CONSTRAINT fk_rails_a7a7423cb9 FOREIGN KEY (recommendation_run_id) REFERENCES public.recommendation_runs(id) ON DELETE CASCADE;
 
 
 --
@@ -2867,6 +3602,14 @@ ALTER TABLE ONLY public.embeddings
 
 ALTER TABLE ONLY public.supplier_observations
     ADD CONSTRAINT fk_rails_af15bf8fed FOREIGN KEY (supplier_id) REFERENCES public.suppliers(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: clarification_decisions fk_rails_b0cc8d9996; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clarification_decisions
+    ADD CONSTRAINT fk_rails_b0cc8d9996 FOREIGN KEY (requirement_id) REFERENCES public.requirements(id) ON DELETE SET NULL;
 
 
 --
@@ -2886,11 +3629,11 @@ ALTER TABLE ONLY public.sync_runs
 
 
 --
--- Name: search_documents fk_rails_bb18fac0bb; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: recommendation_evidence fk_rails_c19f83666f; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.search_documents
-    ADD CONSTRAINT fk_rails_bb18fac0bb FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.recommendation_evidence
+    ADD CONSTRAINT fk_rails_c19f83666f FOREIGN KEY (supplier_observation_id) REFERENCES public.supplier_observations(id) ON DELETE RESTRICT;
 
 
 --
@@ -2902,11 +3645,19 @@ ALTER TABLE ONLY public.products
 
 
 --
--- Name: embeddings fk_rails_cd9e26c5f4; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: requirements fk_rails_ccce84f25c; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.embeddings
-    ADD CONSTRAINT fk_rails_cd9e26c5f4 FOREIGN KEY (embedding_model_id) REFERENCES public.embedding_models(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY public.requirements
+    ADD CONSTRAINT fk_rails_ccce84f25c FOREIGN KEY (originating_message_id) REFERENCES public.shopping_messages(id) ON DELETE SET NULL;
+
+
+--
+-- Name: shopping_messages fk_rails_ce3d4b27c5; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.shopping_messages
+    ADD CONSTRAINT fk_rails_ce3d4b27c5 FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE CASCADE;
 
 
 --
@@ -2918,11 +3669,35 @@ ALTER TABLE ONLY public.product_variants
 
 
 --
+-- Name: agent_runs fk_rails_db0a375456; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.agent_runs
+    ADD CONSTRAINT fk_rails_db0a375456 FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE CASCADE;
+
+
+--
 -- Name: shopping_sessions fk_rails_de779ffa76; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.shopping_sessions
     ADD CONSTRAINT fk_rails_de779ffa76 FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: requirements fk_rails_e0ca4e43a8; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.requirements
+    ADD CONSTRAINT fk_rails_e0ca4e43a8 FOREIGN KEY (supersedes_requirement_id) REFERENCES public.requirements(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: clarification_decisions fk_rails_f057674bdb; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clarification_decisions
+    ADD CONSTRAINT fk_rails_f057674bdb FOREIGN KEY (shopping_session_id) REFERENCES public.shopping_sessions(id) ON DELETE CASCADE;
 
 
 --
@@ -2996,7 +3771,7 @@ ALTER TABLE ONLY public.supplier_variants
 SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
-('20260920000005'),
+('20260920000006'),
 ('20260920000004'),
 ('20260920000003'),
 ('20260920000002'),
