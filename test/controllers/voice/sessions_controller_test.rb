@@ -3,12 +3,24 @@ require "test_helper"
 class Voice::SessionsControllerTest < ActionDispatch::IntegrationTest
   include TestSupport::IdentityRecords
 
+  # bin/rails test with no explicit file arguments boots the Rails app (running
+  # config/initializers/eleven_labs.rb, which reads ENV once) before this file's
+  # `require "test_helper"` ever executes, so a test-only ENV default set here
+  # would arrive too late. Stub the already-booted app-wide config directly
+  # instead, scoped to this file, so the real default wiring (Agents::
+  # VoiceSessionAuthorizer.new -> Integrations::ElevenLabs::Adapter.new) is
+  # exercised end-to-end in fixture mode with a deterministic, non-secret agent id.
   setup do
     travel_to TestSupport::IdentityRecords::REFERENCE_TIME
     clear_identity_records
+    @previous_eleven_labs_config = Rails.application.config.x.eleven_labs
+    Rails.application.config.x.eleven_labs = Integrations::ElevenLabs::Config.new(
+      api_key: nil, agent_id: "demo-agent-fixture", tool_secret: nil, webhook_secret: nil
+    )
   end
 
   teardown do
+    Rails.application.config.x.eleven_labs = @previous_eleven_labs_config
     clear_identity_records
     travel_back
   end
