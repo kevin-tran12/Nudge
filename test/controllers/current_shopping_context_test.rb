@@ -14,13 +14,20 @@ class CurrentShoppingContextTest < ActionController::TestCase
 
   tests CurrentShoppingContextProbeController
 
+  # The controller resolves identity with the real clock, while these records are
+  # built around REFERENCE_TIME. Without freezing, the assertions silently decay
+  # into vacuous anonymous results once wall-clock passes the session window.
   setup do
+    travel_to TestSupport::IdentityRecords::REFERENCE_TIME
     clear_identity_records
     @routes = ActionDispatch::Routing::RouteSet.new
     @routes.draw { get "show" => "current_shopping_context_probe#show" }
   end
 
-  teardown { clear_identity_records }
+  teardown do
+    clear_identity_records
+    travel_back
+  end
 
   test "controller derives session and user only from the signed cookie" do
     user = create_user
