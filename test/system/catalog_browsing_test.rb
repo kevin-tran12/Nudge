@@ -76,6 +76,23 @@ class CatalogBrowsingTest < ApplicationSystemTestCase
     assert_link "Back to catalog", href: products_path
   end
 
+  test "catalog search is keyboard operable and shows a clear empty state for no matches" do
+    set_viewport(1280, 900)
+    visit products_path
+
+    assert_selector "h2", text: "Search the catalog"
+    fill_in "Search products", with: "nonexistent-widget-zzz"
+    find_field("Search products").native.send_keys(:enter)
+
+    assert_selector "h2", text: /No results for/
+    assert_no_horizontal_overflow("desktop after search")
+    assert_minimum_target_sizes("desktop after search")
+
+    click_link "Browse full catalog"
+    assert_selector "h1", text: "Browse the sample catalog"
+    assert_selector "article", count: Catalog::FixtureProductReader::DEFAULT_PRODUCT_IDS.size
+  end
+
   test "keyboard focus skip link aria current and reduced motion remain explicit" do
     set_viewport(320, 720)
     page.driver.browser.execute_cdp("Emulation.setEmulatedMedia",

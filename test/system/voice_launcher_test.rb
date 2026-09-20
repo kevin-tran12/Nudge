@@ -153,6 +153,46 @@ class VoiceLauncherTest < ApplicationSystemTestCase
     assert_equal 2, voice_requests.count { |request| request.fetch("url") == "/voice/session" }
   end
 
+  test "the disclosure opens as a modal dialog, moves focus in, and returns focus to the trigger on close" do
+    visit products_path
+
+    click_button "Start voice shopping"
+    assert_selector "[data-voice-launcher][data-voice-state='disclosure_required']"
+
+    assert page.evaluate_script("document.querySelector('[data-voice-disclosure]').open")
+    assert_equal "voice-disclosure-heading", page.evaluate_script(<<~JAVASCRIPT)
+      document.querySelector('[data-voice-disclosure]').getAttribute('aria-labelledby')
+    JAVASCRIPT
+    assert page.evaluate_script(<<~JAVASCRIPT), "focus should move into the open dialog"
+      document.querySelector('[data-voice-disclosure]').contains(document.activeElement)
+    JAVASCRIPT
+
+    click_button "Not now"
+
+    assert_selector "[data-voice-launcher][data-voice-state='idle']"
+    refute page.evaluate_script("document.querySelector('[data-voice-disclosure]').open")
+    assert page.evaluate_script(<<~JAVASCRIPT), "focus should return to the trigger button"
+      document.activeElement === document.querySelector('[data-voice-action="start"]')
+    JAVASCRIPT
+    assert_equal 0, voice_requests.length
+  end
+
+  test "Escape closes the disclosure dialog and is equivalent to Not now, never starting voice" do
+    visit products_path
+    stub_voice_network(session: successful_session_response)
+
+    click_button "Start voice shopping"
+    assert_selector "[data-voice-launcher][data-voice-state='disclosure_required']"
+    assert page.evaluate_script("document.querySelector('[data-voice-disclosure]').open")
+
+    find("[data-voice-disclosure]").send_keys(:escape)
+
+    assert_selector "[data-voice-launcher][data-voice-state='idle']"
+    refute page.evaluate_script("document.querySelector('[data-voice-disclosure]').open")
+    assert_equal 0, voice_requests.length
+    assert_no_selector "elevenlabs-convai"
+  end
+
   private
     def successful_session_response
       {

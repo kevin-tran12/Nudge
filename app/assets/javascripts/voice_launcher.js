@@ -39,19 +39,30 @@
     return meta ? meta.getAttribute("content") : null;
   }
 
-  function setSectionVisible(section, visible) {
-    if (!section) return;
-    section.toggleAttribute("hidden", !visible);
-    var controls = section.querySelectorAll("button, a[href], input, select, textarea");
+  // Disables/re-enables and un-tabs/tabs every control within a container,
+  // without touching the container's own visibility. Used both for the
+  // hidden-attribute sections below and for the native <dialog>, whose own
+  // open/closed state already controls its visibility -- a closed dialog's
+  // descendants must not be left focusable or counted as live interactive
+  // targets by controls disabled here.
+  function setControlsInteractive(container, interactive) {
+    if (!container) return;
+    var controls = container.querySelectorAll("button, a[href], input, select, textarea");
     for (var index = 0; index < controls.length; index += 1) {
       var control = controls[index];
-      if ("disabled" in control) control.disabled = !visible;
-      if (visible) {
+      if ("disabled" in control) control.disabled = !interactive;
+      if (interactive) {
         control.removeAttribute("tabindex");
       } else {
         control.setAttribute("tabindex", "-1");
       }
     }
+  }
+
+  function setSectionVisible(section, visible) {
+    if (!section) return;
+    section.toggleAttribute("hidden", !visible);
+    setControlsInteractive(section, visible);
   }
 
   function VoiceLauncher(root) {
@@ -70,8 +81,10 @@
     this.statusEl = root.querySelector("[data-voice-status]");
     this.fallback = root.querySelector("[data-voice-fallback]");
     this.widgetMount = root.querySelector("[data-voice-widget-mount]");
+    this.disclosureTrigger = null;
 
     this.bind();
+    this.bindDisclosureDialog();
     this.render();
   }
 
@@ -104,6 +117,49 @@
     }
   };
 
+  // The disclosure is a native <dialog> opened with showModal(), which gives
+  // us a real focus trap and default "focus moves in on open" behavior for
+  // free. We still own the open/close transitions so they stay in lockstep
+  // with voice state, and we listen for the dialog's own "cancel" event
+  // (fired for Escape and any other native dismissal) so that closing the
+  // dialog by any means is always equivalent to pressing "Not now": it never
+  // starts voice.
+  VoiceLauncher.prototype.bindDisclosureDialog = function () {
+    var self = this;
+    var dialog = this.disclosure;
+    if (!dialog) return;
+
+    dialog.addEventListener("cancel", function (event) {
+      event.preventDefault();
+      self.setState("idle");
+    });
+
+    dialog.addEventListener("close", function () {
+      var trigger = self.disclosureTrigger;
+      self.disclosureTrigger = null;
+      if (trigger && typeof trigger.focus === "function") {
+        trigger.focus();
+      }
+    });
+  };
+
+  VoiceLauncher.prototype.syncDisclosureDialog = function (state) {
+    var dialog = this.disclosure;
+    if (!dialog || typeof dialog.showModal !== "function") return;
+
+    var shouldBeOpen = state === "disclosure_required";
+    setControlsInteractive(dialog, shouldBeOpen);
+
+    if (shouldBeOpen) {
+      if (!dialog.open) {
+        this.disclosureTrigger = document.activeElement;
+        dialog.showModal();
+      }
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  };
+
   VoiceLauncher.prototype.setState = function (next) {
     if (STATES.indexOf(next) === -1) return;
     this.state = next;
@@ -114,7 +170,7 @@
     var state = this.state;
     this.root.setAttribute("data-voice-state", state);
 
-    setSectionVisible(this.disclosure, state === "disclosure_required");
+    this.syncDisclosureDialog(state);
     setSectionVisible(this.fallback, !!FALLBACK_STATES[state]);
 
     var message = STATUS_COPY[state] || "";
