@@ -6,8 +6,13 @@ module Catalog
       "00001234", "00002001", "00002002", "00002003",
       "00002004", "00002005", "00002006", "00002007"
     ].freeze
+    # Verified against live CJ responses: product detail serves its images from
+    # oss-cf.cjdropshipping.com, so an allowlist without it rejects every real
+    # product. All three are first-party supplier CDN hosts; the rule itself is
+    # unchanged (exact host match, HTTPS only, no userinfo, query or fragment).
     APPROVED_MEDIA_HOSTS = %w[
       cf.cjdropshipping.com
+      oss-cf.cjdropshipping.com
       cc-west-usa.oss-us-west-1.aliyuncs.com
     ].freeze
     ID_PATTERN = /\A[A-Za-z0-9_{}-]+\z/

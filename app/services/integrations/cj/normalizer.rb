@@ -9,7 +9,9 @@ module Integrations
     class Normalizer
       MAX_BODY_BYTES = 262_144
       MAX_LIST_ITEMS = 200
-      MEDIA_HOSTS = %w[cf.cjdropshipping.com cc-west-usa.oss-us-west-1.aliyuncs.com].freeze
+      # oss-cf.cjdropshipping.com verified against live CJ product detail responses.
+      MEDIA_HOSTS = %w[cf.cjdropshipping.com oss-cf.cjdropshipping.com
+        cc-west-usa.oss-us-west-1.aliyuncs.com].freeze
       ENDPOINTS = { product: "product/query", inventory: "product/stock/queryByVid", freight: "logistic/freightCalculate",
         product_list: "product/list" }.freeze
 
