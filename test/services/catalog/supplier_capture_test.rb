@@ -127,19 +127,64 @@ class CatalogSupplierCaptureTest < ActiveSupport::TestCase
     assert_equal({ product_list: 2, product: 3, inventory: 5 }, summary.calls)
   end
 
-  test "a tampered response body is rejected before anything is imported" do
-    tamper = lambda do |operation, _request, body|
-      next body unless operation == :product
+  test "a tampered response body imports nothing for that product and is reported as a failure" do
+    transport = build_transport(tamper: inject_unknown_field)
 
-      payload = JSON.parse(body)
-      payload["data"]["injectedField"] = "tampered"
-      JSON.generate(payload)
-    end
-    transport = build_transport(tamper: tamper)
+    summary = run_capture(transport, max_products: 1, page_size: 1)
 
-    error = assert_raises(Catalog::SupplierCapture::Error) { run_capture(transport, max_products: 1, page_size: 1) }
+    assert_equal 1, summary.products_failed
+    assert_equal [ "00002001" ], summary.failures.map(&:product_id)
+    assert_equal [ :malformed_response ], summary.failures.map(&:code)
+    assert_equal 0, summary.products_captured
+    assert_equal 0, summary.products_imported
+    assert_equal 0, SupplierProduct.count
+    assert_equal 0, Product.count
+  end
 
-    assert_equal :malformed_response, error.code
+  test "one product failing validation is skipped and counted while the rest of the run imports" do
+    transport = build_transport(tamper: inject_unknown_field(only: "00002002"))
+
+    summary = run_capture(transport, max_products: 3, page_size: 3)
+
+    assert_equal 3, summary.products_discovered
+    assert_equal 2, summary.products_imported
+    assert_equal 1, summary.products_failed
+    assert_equal [ "00002002" ], summary.failures.map(&:product_id)
+    assert_equal [ :malformed_response ], summary.failures.map(&:code)
+    assert_includes summary.to_s, "products_failed=1"
+    assert_includes summary.to_s, "failures=00002002:malformed_response"
+    assert_equal %w[00002001 00002003],
+      SupplierProduct.where(supplier: @supplier).order(:external_product_id).pluck(:external_product_id)
+    assert_nil SupplierProduct.find_by(external_product_id: "00002002")
+    assert_operator InventoryObservation.count, :>, 0
+  end
+
+  test "a credentials failure aborts the whole run immediately" do
+    transport = build_transport(tamper: provider_code(1600002, only: "00002002"))
+
+    error = assert_raises(Catalog::SupplierCapture::Error) { run_capture(transport, max_products: 3, page_size: 3) }
+
+    assert_equal :authentication_failed, error.code
+    assert_equal 2, transport.count(:product)
+    assert_equal [ "00002001" ], SupplierProduct.pluck(:external_product_id)
+  end
+
+  test "a quota exhaustion reported by the provider aborts the whole run immediately" do
+    transport = build_transport(tamper: provider_code(1600201, only: "00002002"))
+
+    error = assert_raises(Catalog::SupplierCapture::Error) { run_capture(transport, max_products: 3, page_size: 3) }
+
+    assert_equal :quota_exhausted, error.code
+    assert_equal 2, transport.count(:product)
+  end
+
+  test "the run aborts once too many products fail in a row" do
+    transport = build_transport(tamper: inject_unknown_field)
+
+    error = assert_raises(Catalog::SupplierCapture::Error) { run_capture(transport, max_products: 7, page_size: 7) }
+
+    assert_equal :too_many_product_failures, error.code
+    assert_equal Catalog::SupplierCapture::MAX_CONSECUTIVE_PRODUCT_FAILURES, transport.count(:product)
     assert_equal 0, SupplierProduct.count
     assert_equal 0, Product.count
   end
@@ -195,6 +240,29 @@ class CatalogSupplierCaptureTest < ActiveSupport::TestCase
   end
 
   private
+    # Makes one product (or every product) carry a field outside the validator
+    # allowlist, which is what a genuinely unexpected product looks like.
+    def inject_unknown_field(only: nil)
+      lambda do |operation, request, body|
+        next body unless operation == :product
+        next body unless only.nil? || request.fetch("product_id") == only
+
+        payload = JSON.parse(body)
+        payload["data"]["injectedField"] = "unexpected"
+        JSON.generate(payload)
+      end
+    end
+
+    # A run-level provider refusal (credentials, quota) rather than one bad product.
+    def provider_code(code, only:)
+      lambda do |operation, request, body|
+        next body unless operation == :product && request.fetch("product_id") == only
+
+        JSON.generate("code" => code, "result" => false, "message" => "refused",
+          "requestId" => "stub-refusal")
+      end
+    end
+
     def build_transport(tamper: nil, pids: CATALOG_PIDS)
       StubTransport.new(bodies: @bodies, pids: pids, tamper: tamper)
     end

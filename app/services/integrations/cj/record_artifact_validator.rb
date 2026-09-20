@@ -12,7 +12,7 @@ module Integrations
       FIXTURE_VERSION = 1
       MAX_ARTIFACT_BYTES = 1_048_576
       ARTIFACT_KEYS = %w[fixture_version observed_at request response].freeze
-      OPERATIONS = %i[product inventory freight].freeze
+      OPERATIONS = %i[product inventory freight product_list].freeze
       IDENTIFIER = /\A[A-Za-z0-9_{}-]+\z/
       COUNTRY = /\A[A-Z]{2}\z/
       FORBIDDEN_KEYS = %w[
@@ -21,13 +21,41 @@ module Integrations
         zipcode postalcode token credential secret password
       ].freeze
       RESPONSE_KEYS = %w[code data message requestId result].freeze
-      PRODUCT_KEYS = %w[description pid productImageSet productNameEn productSku variants].freeze
+      # PRODUCT_KEYS, VARIANT_KEYS, PRODUCT_LIST_KEYS, PRODUCT_LIST_ITEM_KEYS and
+      # INVENTORY_KEYS are the complete field sets captured from live
+      # authenticated CJ responses on 2026-09-20 (product/query,
+      # product/list, product/stock/queryByVid). They are evidenced, not
+      # inferred: the earlier sets were derived from hand-sanitized fixtures and
+      # were narrower than reality, so every genuine response was rejected.
+      # These stay strict allowlists -- only reviewed fields are ever persisted
+      # as evidence -- so a field CJ adds later fails closed until it is
+      # captured, reviewed, and added here.
+      PRODUCT_KEYS = %w[
+        addMarkStatus bigImage categoryId categoryName createrTime customizationJson1 customizationJson2
+        customizationJson3 customizationJson4 customizationVersion description entryCode entryName
+        entryNameEn isTestProduct listedNum materialKey materialKeySet materialName materialNameEn
+        materialNameEnSet materialNameSet packingKey packingKeySet packingName packingNameEn
+        packingNameEnSet packingNameSet packingWeight pid productImage productImageSet productKey
+        productKeyEn productKeyEnSet productKeySet productName productNameEn productNameSet productPro
+        productProEn productProEnSet productProSet productSku productType productUnit productVideo
+        productWeight sellPrice sourceFrom status suggestSellPrice supplierId supplierName variants
+      ].freeze
       VARIANT_KEYS = %w[
-        pid variantHeight variantLength variantNameEn variantSellPrice variantSku
-        variantWeight variantWidth vid
+        barcode combineNum combineVariants createTime inventories inventoryNum pid variantHeight
+        variantImage variantKey variantLength variantName variantNameEn variantProperty variantSellPrice
+        variantSku variantStandard variantSugSellPrice variantUnit variantVolume variantWeight
+        variantWidth vid
+      ].freeze
+      PRODUCT_LIST_KEYS = %w[list pageNum pageSize total].freeze
+      PRODUCT_LIST_ITEM_KEYS = %w[
+        addMarkStatus categoryId categoryName createTime customizationVersion isFreeShipping isTestProduct
+        isVideo listedNum listingCount oneCategoryId oneCategoryName pid productImage productName
+        productNameEn productSku productType productUnit productWeight remark saleStatus sellPrice
+        shippingCountryCodes sourceFrom supplierId supplierName threeCategoryName twoCategoryId
+        twoCategoryName
       ].freeze
       INVENTORY_KEYS = %w[
-        areaId cjInventoryNum countryCode factoryInventoryNum stock totalInventoryNum vid
+        areaEn areaId cjInventoryNum countryCode factoryInventoryNum stock storageNum totalInventoryNum vid
       ].freeze
       STOCK_KEYS = %w[factoryInventory inventory stockId].freeze
       FREIGHT_KEYS = %w[
@@ -36,6 +64,9 @@ module Integrations
       ACTIVE_ELEMENTS = "script, style, template, iframe, object".freeze
       MAX_ABSOLUTE_NUMBER = BigDecimal("9999999999").freeze
       MIN_DECIMAL_EXPONENT = -24
+      MAX_LIST_PAGE_SIZE = 200
+      MAX_FILTER_BYTES = 100
+      CONTROL_CHARACTERS = Regexp.new("[\u0000-\u001f\u007f]").freeze
 
       class DuplicateKey < StandardError; end
 
@@ -172,6 +203,20 @@ module Integrations
               item.fetch("variant_id")
             end
             raise Error.new(:invalid_input) unless ids.uniq.size == ids.size
+          when :product_list
+            exact_keys!(request, %w[categoryId keyword pageNum pageSize])
+            page = request.fetch("pageNum")
+            page_size = request.fetch("pageSize")
+            unless page.instance_of?(Integer) && page >= 1 && page_size.instance_of?(Integer) &&
+                page_size.between?(1, MAX_LIST_PAGE_SIZE)
+              raise Error.new(:invalid_input)
+            end
+
+            category = request.fetch("categoryId")
+            keyword = request.fetch("keyword")
+            raise Error.new(:invalid_input) if category.nil? && keyword.nil?
+
+            [ category, keyword ].compact.each { |filter| filter_text!(filter) }
           end
 
           canonicalize(request)
@@ -231,6 +276,11 @@ module Integrations
           when :freight
             raise Error.new(:malformed_response) unless data.is_a?(Array)
             data.each { |quote| object!(quote, FREIGHT_KEYS) }
+          when :product_list
+            object!(data, PRODUCT_LIST_KEYS)
+            rows = data.fetch("list")
+            raise Error.new(:malformed_response) unless rows.is_a?(Array)
+            rows.each { |row| object!(row, PRODUCT_LIST_ITEM_KEYS) }
           end
         end
 
@@ -307,6 +357,15 @@ module Integrations
         def identifier!(value)
           unless value.is_a?(String) && value.encoding == Encoding::UTF_8 && value.valid_encoding? &&
               value.bytesize.between?(1, 200) && value.match?(IDENTIFIER)
+            raise Error.new(:invalid_input)
+          end
+        end
+
+        # Outgoing single-line list filters, mirroring the bound the adapter
+        # applies before the call is made.
+        def filter_text!(value)
+          unless value.is_a?(String) && value.encoding == Encoding::UTF_8 && value.valid_encoding? &&
+              value.bytesize.between?(1, MAX_FILTER_BYTES) && !value.match?(CONTROL_CHARACTERS)
             raise Error.new(:invalid_input)
           end
         end
