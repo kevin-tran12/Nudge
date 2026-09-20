@@ -15,7 +15,7 @@ class VoiceSessionToToolTest < ActionDispatch::IntegrationTest
     clear_identity_records
     @previous_eleven_labs_config = Rails.application.config.x.eleven_labs
     Rails.application.config.x.eleven_labs = Integrations::ElevenLabs::Config.new(
-      api_key: nil, agent_id: "demo-agent-fixture", tool_secret: nil, webhook_secret: nil
+      api_key: nil, agent_id: "demo-agent-fixture", tool_secret: nil, webhook_secret: nil, mode: "fixture"
     )
   end
 

@@ -1,0 +1,14 @@
+# Deliberate, bounded live-provider verification. This overlay is never part of
+# an ordinary build, boot, test, or CI command: it must be named explicitly with
+# -f, so nothing here can cause an accidental live call.
+#
+#   docker compose -f compose.yaml -f compose.live-voice.yaml up app
+#
+# It loads the untracked .env.providers so the container, not the operator and
+# not any agent, reads the credential. Only the ElevenLabs path is activated.
+services:
+  app:
+    env_file:
+      - .env.providers
+    environment:
+      ELEVENLABS_MODE: live
