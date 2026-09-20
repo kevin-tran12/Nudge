@@ -1,0 +1,42 @@
+<% content_for :title, "#{@paid ? "Order confirmed" : "Checkout status"} | Nudge" %>
+
+<section class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+  <%= render "shared/badge", label: "Stripe test mode", tone: :warning %>
+
+  <% if @paid %>
+    <h1 class="mt-5 font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">Order confirmed</h1>
+    <div class="mt-6" data-checkout-confirmed="true">
+      <%= render "shared/notice", title: "Payment confirmed", message: "Stripe reports this test-mode payment as paid.", tone: :success %>
+    </div>
+  <% else %>
+    <h1 class="mt-5 font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">Payment not yet confirmed</h1>
+    <div class="mt-6" data-checkout-confirmed="false">
+      <%= render "shared/notice", title: "Not confirmed", message: "Stripe has not reported this checkout as paid (status: #{checkout_payment_status_label(@session)}). If you completed payment, this page will update once Stripe confirms it.", tone: :warning %>
+    </div>
+  <% end %>
+
+  <dl class="mt-8 grid grid-cols-1 gap-4 rounded-card border border-line bg-surface p-5 shadow-card sm:grid-cols-2">
+    <div><dt class="text-xs font-bold uppercase tracking-wider text-muted">Checkout reference</dt><dd class="mt-1 break-all text-ink"><%= @intent.public_id %></dd></div>
+    <div><dt class="text-xs font-bold uppercase tracking-wider text-muted">Payment status</dt><dd class="mt-1 text-ink"><%= checkout_payment_status_label(@session) %></dd></div>
+  </dl>
+
+  <h2 class="mt-10 font-display text-2xl font-bold tracking-tight text-ink">What you purchased</h2>
+  <ul class="mt-4 divide-y divide-line rounded-card border border-line bg-surface shadow-card">
+    <% @line_items.each do |item| %>
+      <li class="flex flex-wrap items-center justify-between gap-3 p-5">
+        <div class="min-w-0">
+          <p class="break-words font-semibold text-ink"><%= item.name %></p>
+          <p class="mt-1 text-sm text-muted">Qty <%= item.quantity %> &times; <%= checkout_money(item.unit_amount_minor, item.currency) %></p>
+        </div>
+        <p class="font-semibold text-ink"><%= checkout_money(item.unit_amount_minor * item.quantity, item.currency) %></p>
+      </li>
+    <% end %>
+  </ul>
+
+  <div class="mt-6 flex items-center justify-between rounded-card border border-line bg-surface p-5 shadow-card">
+    <p class="text-lg font-bold text-ink">Total</p>
+    <p class="text-lg font-bold text-ink"><%= checkout_money(@total_minor, @currency) %></p>
+  </div>
+
+  <div class="mt-8"><%= render "shared/button", label: "Back to catalog", href: products_path, variant: :secondary %></div>
+</section>

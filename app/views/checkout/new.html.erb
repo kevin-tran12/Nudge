@@ -1,0 +1,37 @@
+<% content_for :title, "Checkout | Nudge" %>
+
+<section class="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+  <%= render "shared/badge", label: "Stripe test mode", tone: :warning %>
+  <h1 class="mt-5 font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">Review your order</h1>
+  <p class="mt-4 text-lg leading-8 text-muted">Checkout runs in Stripe test mode. No real payment method is charged.</p>
+
+  <% if @cart.nil? %>
+    <section class="mt-8 rounded-card border border-line bg-surface p-6 shadow-card sm:p-8">
+      <h2 class="font-display text-2xl font-bold text-ink">Your cart is empty</h2>
+      <p class="mt-2 text-muted">Add an item to your cart before checking out.</p>
+      <div class="mt-5"><%= render "shared/button", label: "Browse the catalog", href: products_path, variant: :secondary %></div>
+    </section>
+  <% else %>
+    <ul class="mt-8 divide-y divide-line rounded-card border border-line bg-surface shadow-card">
+      <% @line_items.each do |item| %>
+        <li class="flex flex-wrap items-center justify-between gap-3 p-5">
+          <div class="min-w-0">
+            <p class="break-words font-semibold text-ink"><%= item.name %></p>
+            <p class="mt-1 text-sm text-muted">Qty <%= item.quantity %> &times; <%= checkout_money(item.unit_amount_minor, item.currency) %></p>
+          </div>
+          <p class="font-semibold text-ink"><%= checkout_money(item.unit_amount_minor * item.quantity, item.currency) %></p>
+        </li>
+      <% end %>
+    </ul>
+
+    <div class="mt-6 flex items-center justify-between rounded-card border border-line bg-surface p-5 shadow-card">
+      <p class="text-lg font-bold text-ink">Total</p>
+      <p class="text-lg font-bold text-ink"><%= checkout_money(@total_minor, @currency) %></p>
+    </div>
+
+    <div class="mt-8">
+      <%= button_to "Checkout with Stripe (test)", checkout_path, method: :post,
+            class: "inline-flex min-h-11 min-w-11 items-center justify-center rounded-full bg-brand-700 px-5 py-2.5 text-center text-sm font-bold text-white shadow-sm transition-colors hover:bg-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2 motion-reduce:transition-none" %>
+    </div>
+  <% end %>
+</section>
