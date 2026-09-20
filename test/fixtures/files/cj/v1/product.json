@@ -1,0 +1,17 @@
+{
+  "fixture_version": 1,
+  "observed_at": "2026-09-20T00:00:00Z",
+  "request": { "product_id": "00001234" },
+  "response": {
+    "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-product-1",
+    "data": {
+      "pid": "00001234", "productSku": "FIXTURE-BIN", "productNameEn": "Stacking storage bin",
+      "description": "<p>A reusable <strong>storage bin</strong>.</p>",
+      "productImageSet": ["https://cf.cjdropshipping.com/fixture/storage-bin.jpg"],
+      "variants": [
+        { "pid": "00001234", "vid": "00005678", "variantSku": "FIXTURE-BIN-S", "variantNameEn": "Small bin", "variantSellPrice": 12.34, "variantWeight": 250.5, "variantLength": 200, "variantWidth": 150, "variantHeight": 100 },
+        { "pid": "00001234", "vid": "fixture-variant-unknown", "variantSku": null, "variantNameEn": "Unmeasured bin", "variantSellPrice": null, "variantWeight": null }
+      ]
+    }
+  }
+}
