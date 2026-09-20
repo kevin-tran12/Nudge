@@ -8,8 +8,10 @@ module Integrations
   module Cj
     class Normalizer
       MAX_BODY_BYTES = 262_144
+      MAX_LIST_ITEMS = 200
       MEDIA_HOSTS = %w[cf.cjdropshipping.com cc-west-usa.oss-us-west-1.aliyuncs.com].freeze
-      ENDPOINTS = { product: "product/query", inventory: "product/stock/queryByVid", freight: "logistic/freightCalculate" }.freeze
+      ENDPOINTS = { product: "product/query", inventory: "product/stock/queryByVid", freight: "logistic/freightCalculate",
+        product_list: "product/list" }.freeze
 
       def call(operation:, body:, request:, observed_at:)
         invalid! unless ENDPOINTS.key?(operation) && body.is_a?(String) && body.bytesize <= MAX_BODY_BYTES
@@ -22,6 +24,7 @@ module Integrations
         when :product then product(payload["data"], request.fetch("product_id"))
         when :inventory then inventory(payload["data"], request.fetch("variant_id"))
         when :freight then freight(payload["data"])
+        when :product_list then product_list(payload["data"], request)
         end
         provenance = Contracts::Provenance.new(provider: :cj, source: :synthetic_fixture,
           endpoint_key: ENDPOINTS.fetch(operation), adapter_version: "1", payload_version: "1",
@@ -93,6 +96,39 @@ module Integrations
               delivery_estimate: optional_text(row["logisticAging"]),
               kind: :estimate, eligibility: :unknown, expires_at: nil)
           end
+        end
+
+        # Product List V2. Wire field names for the list envelope ("list",
+        # "total") and per-item fields (pid/productNameEn/productSku/
+        # productImage/sellPrice, inferred by analogy with the confirmed
+        # product/variant field names in .planning/CJ_SCHEMA_EVIDENCE.md) are
+        # not yet verified by an owner-authorized capture; an unexpected shape
+        # fails closed rather than being guessed permissively. Page and page
+        # size are taken from the already-validated outgoing request rather
+        # than trusted from the response.
+        def product_list(data, request)
+          object!(data)
+          page = request.fetch("pageNum")
+          page_size = request.fetch("pageSize")
+          total = total_count(data["total"])
+          items = array!(data["list"], limit: MAX_LIST_ITEMS).map { |row| product_summary(row) }
+          invalid! unless items.map(&:external_id).uniq.size == items.size
+
+          Contracts::ProductListPage.new(products: items, page: page, page_size: page_size,
+            total_count: total, has_more: (page * page_size) < total)
+        end
+
+        def product_summary(row)
+          object!(row)
+          Contracts::ProductSummary.new(external_id: identifier(row["pid"]),
+            sku: optional_reference(row["productSku"]), title: plain_text(row["productNameEn"], limit: 200),
+            image_url: row["productImage"].nil? ? nil : media_url(row["productImage"]),
+            price: money(row["sellPrice"]))
+        end
+
+        def total_count(value)
+          invalid! unless value.is_a?(Integer) && value.between?(0, 2_147_483_647)
+          value
         end
 
         def money(value)

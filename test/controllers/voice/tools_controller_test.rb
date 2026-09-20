@@ -2,15 +2,19 @@ require "test_helper"
 
 class Voice::ToolsControllerTest < ActionDispatch::IntegrationTest
   include TestSupport::IdentityRecords
+  include TestSupport::CatalogRecords
 
   ORIGIN = "http://www.example.com"
 
   setup do
     travel_to TestSupport::IdentityRecords::REFERENCE_TIME
     clear_identity_records
+    clear_catalog_records
+    create_cj_supplier
   end
 
   teardown do
+    clear_catalog_records
     clear_identity_records
     travel_back
   end
@@ -178,6 +182,19 @@ class Voice::ToolsControllerTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_equal 0, response.parsed_body.fetch("count")
+  end
+
+  test "add_to_cart adds to the caller's own session-resolved cart through the full tool boundary" do
+    session = create_shopping_session
+    token = issue_grant_for(session)
+    set_session_cookie(session)
+
+    post_tool("add_to_cart", { "product_id" => "00001234", "variant_id" => "00005678", "quantity" => 2 }, token: token)
+
+    assert_response :success
+    body = response.parsed_body
+    assert body.fetch("added")
+    assert_equal 2, body.fetch("quantity_in_cart")
   end
 
   private

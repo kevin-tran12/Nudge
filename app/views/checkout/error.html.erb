@@ -1,0 +1,8 @@
+<% content_for :title, "#{@error_title} | Nudge" %>
+
+<section class="mx-auto flex w-full max-w-3xl flex-col px-4 py-16 sm:px-6 sm:py-24 lg:px-8">
+  <%= render "shared/badge", label: "Checkout status", tone: :warning %>
+  <h1 class="mt-5 font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl"><%= @error_title %></h1>
+  <p class="mt-4 text-lg leading-8 text-muted"><%= @error_message %></p>
+  <div class="mt-8"><%= render "shared/button", label: "Back to catalog", href: products_path, variant: :secondary %></div>
+</section>

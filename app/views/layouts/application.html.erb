@@ -40,6 +40,7 @@
             <ul class="flex flex-wrap items-center gap-1 text-sm font-semibold text-muted">
               <li><%= link_to "Home", root_path, aria: { current: (controller_name == "home" ? "page" : nil) }.compact, class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %></li>
               <li><%= link_to "Catalog", products_path, aria: { current: (controller_name == "products" ? "page" : nil) }.compact, class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %></li>
+              <li><%= link_to "Cart", cart_path, aria: { current: (controller_name == "carts" || controller_name == "cart_items" ? "page" : nil) }.compact, class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %></li>
               <li><%= link_to "How it works", root_path(anchor: "how-it-works"), class: "inline-flex min-h-11 items-center rounded-full px-4 hover:bg-brand-50 hover:text-brand-800 focus:outline-none focus-visible:ring-4 focus-visible:ring-focus-ring focus-visible:ring-offset-2" %></li>
             </ul>
           </nav>

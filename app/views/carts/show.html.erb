@@ -1,0 +1,33 @@
+<% content_for :title, "Your cart | Nudge" %>
+
+<section class="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
+  <div class="max-w-3xl">
+    <h1 class="font-display text-4xl font-bold tracking-tight text-ink sm:text-5xl">Your cart</h1>
+    <p class="mt-4 text-lg leading-8 text-muted">Review items, update quantities, or remove something before checkout.</p>
+  </div>
+
+  <div class="mt-8">
+    <%= render "shared/notice", title: "Nothing is reserved", message: "Adding an item to your cart does not hold or reserve stock. Availability and price are confirmed again before you pay.", tone: :warning %>
+  </div>
+
+  <% if @snapshot.line_items.empty? %>
+    <section class="mt-8 rounded-card border border-line bg-surface p-6 shadow-card sm:p-8">
+      <h2 class="font-display text-2xl font-bold text-ink">Your cart is empty</h2>
+      <p class="mt-2 text-muted">Browse the sample catalog to find something to add.</p>
+      <div class="mt-5"><%= render "shared/button", label: "Browse catalog", href: products_path, variant: :primary %></div>
+    </section>
+  <% else %>
+    <ul class="mt-8 space-y-5">
+      <%= render partial: "shared/cart/line_item", collection: @snapshot.line_items, as: :line_item %>
+    </ul>
+
+    <section aria-labelledby="cart-total-heading" class="mt-8 rounded-card border border-line bg-surface p-5 shadow-card sm:p-6">
+      <h2 id="cart-total-heading" class="sr-only">Cart total</h2>
+      <p data-cart-total-state="<%= @snapshot.total.state %>" class="text-lg font-bold text-ink"><%= cart_total_label(@snapshot.total) %></p>
+      <% if @snapshot.total.state != :known %>
+        <p class="mt-1 text-sm text-muted">One or more items has an unknown price, so no total can be shown yet.</p>
+      <% end %>
+      <div class="mt-5"><%= render "shared/button", label: "Back to catalog", href: products_path, variant: :secondary %></div>
+    </section>
+  <% end %>
+</section>

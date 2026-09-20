@@ -1,0 +1,22 @@
+<section aria-labelledby="catalog-search-heading" class="min-w-0 rounded-card border border-line bg-surface p-5 shadow-card sm:p-6">
+  <h2 id="catalog-search-heading" class="font-display text-xl font-bold text-ink">Search the catalog</h2>
+  <p class="mt-1 max-w-prose text-sm leading-6 text-muted">Find sample products by name or description.</p>
+
+  <%= form_with url: products_path, method: :get, class: "mt-4" do %>
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+      <div class="min-w-0 flex-1">
+        <%= render "shared/form_field", name: "q", label: "Search products", value: query, autocomplete: "off" %>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <%= render "shared/button", label: "Search", variant: :primary, type: "submit" %>
+        <% if query.present? %>
+          <%= render "shared/button", label: "Clear search", href: products_path, variant: :secondary %>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+
+  <div class="mt-6 border-t border-line pt-5">
+    <%= render "shared/voice_launcher", variant: :secondary %>
+  </div>
+</section>

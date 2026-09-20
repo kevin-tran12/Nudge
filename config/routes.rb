@@ -10,6 +10,12 @@ Rails.application.routes.draw do
 
   resources :products, only: %i[index show]
 
+  resource :cart, only: :show
+  resources :cart_items, only: %i[create update destroy]
+
+  resource :checkout, only: %i[new create], controller: "checkout"
+  get "checkout/:public_id" => "checkout#show", as: :checkout_confirmation
+
   namespace :voice do
     resource :session, only: :create, controller: "sessions"
     post "tools/:tool_name" => "tools#call", as: :tool

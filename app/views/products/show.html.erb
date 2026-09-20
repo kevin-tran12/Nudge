@@ -45,6 +45,14 @@
             <div><dt class="text-xs font-bold uppercase tracking-wider text-muted">Weight</dt><dd class="mt-1 text-ink"><%= catalog_measurement(variant.weight) %></dd></div>
             <div><dt class="text-xs font-bold uppercase tracking-wider text-muted">Size</dt><dd class="mt-1 text-ink"><%= [variant.length, variant.width, variant.height].map { |measurement| catalog_measurement(measurement) }.join(" × ") %></dd></div>
           </dl>
+
+          <%= form_with url: cart_items_path, method: :post, class: "mt-5" do %>
+            <%= hidden_field_tag :catalog_product_id, @product.id %>
+            <%= hidden_field_tag :catalog_variant_id, variant.id %>
+            <%= hidden_field_tag :quantity, 1 %>
+            <%= hidden_field_tag :client_mutation_id, SecureRandom.uuid %>
+            <%= render "shared/button", label: "Add to cart", type: "submit", variant: :primary %>
+          <% end %>
         </article>
       <% end %>
     </div>
