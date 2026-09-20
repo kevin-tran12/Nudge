@@ -5,7 +5,7 @@
   <%= form_with url: products_path, method: :get, class: "mt-4" do %>
     <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
       <div class="min-w-0 flex-1">
-        <%= render "shared/form_field", name: "search", label: "Search products", value: query, autocomplete: "off" %>
+        <%= render "shared/form_field", name: "q", label: "Search products", value: query, autocomplete: "off" %>
       </div>
       <div class="flex flex-wrap gap-3">
         <%= render "shared/button", label: "Search", variant: :primary, type: "submit" %>

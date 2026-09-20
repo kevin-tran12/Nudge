@@ -7,23 +7,23 @@ class CatalogSearchTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_select "h1", text: "Browse the sample catalog"
     assert_select "article", count: Catalog::FixtureProductReader::DEFAULT_PRODUCT_IDS.size
-    assert_select "input#search"
+    assert_select "input#q"
   end
 
   test "searching returns matching products resolved through the lexical index" do
     link_search_document!(external_product_id: "00001234", title: "Stacking storage bin",
       normalized_text: "Stacking storage bin A reusable storage bin.")
 
-    get products_path(search: "storage bin")
+    get products_path(q: "storage bin")
 
     assert_response :success
     assert_select "article", count: 1
     assert_select "a[href='#{product_path('00001234')}']", text: "Stacking storage bin"
-    assert_select "input#search[value='storage bin']"
+    assert_select "input#q[value='storage bin']"
   end
 
   test "a query matching nothing renders a clear empty state rather than an error" do
-    get products_path(search: "nonexistent-widget-zzz")
+    get products_path(q: "nonexistent-widget-zzz")
 
     assert_response :success
     assert_select "h2", text: /No results for/
@@ -31,7 +31,7 @@ class CatalogSearchTest < ActionDispatch::IntegrationTest
   end
 
   test "an empty or whitespace-only query behaves as no query" do
-    get products_path(search: "   ")
+    get products_path(q: "   ")
 
     assert_response :success
     assert_select "article", count: Catalog::FixtureProductReader::DEFAULT_PRODUCT_IDS.size
@@ -39,7 +39,7 @@ class CatalogSearchTest < ActionDispatch::IntegrationTest
   end
 
   test "an over-long query is bounded rather than erroring" do
-    get products_path(search: "x" * 5000)
+    get products_path(q: "x" * 5000)
 
     assert_response :success
     refute_includes response.body, "x" * 500
@@ -47,7 +47,7 @@ class CatalogSearchTest < ActionDispatch::IntegrationTest
 
   test "HTML and SQL metacharacters in the query are handled safely and escaped when echoed back" do
     query = %(<script>alert(1)</script>' OR '1'='1)
-    get products_path(search: query)
+    get products_path(q: query)
 
     assert_response :success
     refute_includes response.body, "<script>alert(1)</script>"
@@ -56,7 +56,7 @@ class CatalogSearchTest < ActionDispatch::IntegrationTest
   end
 
   test "a non-string search parameter is treated as no query" do
-    get products_path(search: [ "a", "b" ])
+    get products_path(q: [ "a", "b" ])
 
     assert_response :success
     assert_select "article", count: Catalog::FixtureProductReader::DEFAULT_PRODUCT_IDS.size

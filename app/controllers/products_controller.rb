@@ -19,7 +19,7 @@ class ProductsController < ApplicationController
     cursor = params[:cursor]
     raise Catalog::ProductReader::Error.new(:invalid_input) unless cursor.nil? || cursor.is_a?(String)
 
-    @query = sanitized_search_query(params[:search])
+    @query = sanitized_search_query(params[:q])
 
     @page =
       if @query
