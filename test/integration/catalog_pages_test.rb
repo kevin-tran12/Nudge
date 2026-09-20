@@ -116,8 +116,7 @@ class CatalogPagesTest < ActionDispatch::IntegrationTest
     refute_includes response.body, "Catalog reader:"
   end
 
-  test "production reader construction fails without changing the Rails environment" do
-    production = ActiveSupport::EnvironmentInquirer.new("production")
+  test "deployed environments bind the database reader instead of the fixture reader" do
     original_environment = Rails.env
     original_cable_config = ActionCable.server.config.cable.deep_dup
     fixture_constructed = false
@@ -126,17 +125,30 @@ class CatalogPagesTest < ActionDispatch::IntegrationTest
       fixture_constructed = true
       flunk "fixture reader constructed"
     end
-    error = with_singleton_method(Catalog::FixtureProductReader, :new, replacement) do
-      assert_raises(Catalog::ProductReader::Error) do
-        ProductsController.build_product_reader(environment: production)
+    [ "production", "staging" ].each do |name|
+      environment = ActiveSupport::EnvironmentInquirer.new(name)
+      reader = with_singleton_method(Catalog::FixtureProductReader, :new, replacement) do
+        ProductsController.build_product_reader(environment:)
       end
+
+      assert_instance_of Catalog::DatabaseProductReader, reader
     end
 
-    assert_equal :source_unavailable, error.code
-    assert_nil error.cause
     refute fixture_constructed
     assert_same original_environment, Rails.env
     assert_equal original_cable_config, ActionCable.server.config.cable
+  end
+
+  test "an unrecognized environment fails closed rather than guessing a reader" do
+    environment = ActiveSupport::EnvironmentInquirer.new("review_app")
+
+    error = assert_raises(Catalog::ProductReader::Error) do
+      ProductsController.build_product_reader(environment:)
+    end
+
+    assert_equal :source_unavailable, error.code
+    assert error.retryable?
+    assert_nil error.cause
   end
 
   private
