@@ -201,8 +201,8 @@ class StripeAdapterTest < ActiveSupport::TestCase
     )
   end
 
-  def config_for(secret_key: "sk_test_key", webhook_secret: "whsec_test_secret")
-    Integrations::Stripe::Config.new(secret_key: secret_key, webhook_secret: webhook_secret)
+  def config_for(secret_key: "sk_test_key", webhook_secret: "whsec_test_secret", mode: "fixture")
+    Integrations::Stripe::Config.new(secret_key: secret_key, webhook_secret: webhook_secret, mode: mode)
   end
 
   def assert_error(code, &block)
