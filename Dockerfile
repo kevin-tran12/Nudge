@@ -33,6 +33,14 @@ RUN bundle install && \
 COPY . .
 RUN SECRET_KEY_BASE_DUMMY=1 bin/rails assets:precompile
 
+FROM build AS production_bundle
+
+ENV BUNDLE_WITHOUT=development:test
+
+RUN bundle install && \
+    bundle clean --force && \
+    rm -rf /usr/local/bundle/ruby/*/cache
+
 FROM build AS development
 
 ENV HOME=/home/rails \
@@ -51,7 +59,7 @@ ENV BUNDLE_DEPLOYMENT=1 \
     HOME=/home/rails \
     RAILS_ENV=production
 
-COPY --from=build /usr/local/bundle /usr/local/bundle
+COPY --from=production_bundle /usr/local/bundle /usr/local/bundle
 COPY --from=build /rails /rails
 
 RUN chown -R rails:rails log storage tmp

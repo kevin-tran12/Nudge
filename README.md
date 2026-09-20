@@ -34,7 +34,7 @@ Build and smoke-test the production-compatible runtime image:
 
 ```bash
 docker build --target runtime --tag nudge:runtime .
-docker run --rm --env SECRET_KEY_BASE_DUMMY=1 nudge:runtime bin/rails runner "Rails.application.eager_load!"
+docker run --rm --env SECRET_KEY_BASE_DUMMY=1 nudge:runtime ruby test/runtime/production_image_contract.rb
 ```
 
 Normal teardown preserves the database:
