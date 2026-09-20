@@ -71,6 +71,7 @@ module Catalog
       without_sql_payload_logging do
         ApplicationRecord.transaction(requires_new: true) do
           supplier.lock!
+          validate_locked_supplier!(context)
           replay = successful_replay(context)
           if replay
             result = result_for_run(replay, replayed: true, dry_run:)
@@ -147,6 +148,13 @@ module Catalog
       def successful_replay(context)
         SyncRun.find_by(supplier: context.supplier, resource_kind: context.operation.to_s,
           scope_key: context.scope_key, status: "succeeded")
+      end
+
+      def validate_locked_supplier!(context)
+        provenance = context.validated.provenance
+        unless context.supplier.key == "cj" && context.supplier.adapter_version == provenance.adapter_version
+          raise Error.new(:supplier_mismatch)
+        end
       end
 
       def preflight_product(context)
@@ -235,36 +243,49 @@ module Catalog
       end
 
       def latest_successful_stock_observation(context)
-        SyncRun.includes(:sync_checkpoints).where(supplier: context.supplier,
-          resource_kind: "inventory", status: "succeeded").filter_map do |run|
-          successfully_applied_stock_observation(context, run)
-        end.max_by { |observation| [ observation.observed_at, observation.id ] }
-      end
-
-      def successfully_applied_stock_observation(context, run)
-        scope = run.scope_json
-        return unless scope.keys.sort == %w[artifact_sha256 external_resource_id operation]
-        return unless scope["operation"] == "inventory" &&
-          scope["external_resource_id"] == context.external_resource_id
-
-        artifact_sha256 = scope["artifact_sha256"]
-        return unless artifact_sha256.is_a?(String) && artifact_sha256.match?(/\A[0-9a-f]{64}\z/) &&
-          run.scope_key == "catalog-import:v1:inventory:#{artifact_sha256}" &&
-          run.mode == "fixture" && run.points_consumed.zero? && run.error_count.zero?
-
-        checkpoints = run.sync_checkpoints.to_a
-        return unless checkpoints.one?
-        checkpoint = checkpoints.first
-        expected_state = scope.merge("subject_count" => run.seen_count, "status" => "applied")
-        return unless checkpoint.checkpoint_key == "artifact_applied" && checkpoint.cursor.nil? &&
-          checkpoint.page_number.nil? && checkpoint.state_schema_version == CHECKPOINT_VERSION &&
-          checkpoint.state_json == expected_state
-
-        SupplierObservation.where(supplier: context.supplier, resource_kind: "stock",
-          external_resource_id: context.external_resource_id,
-          payload_sha256: decoded_hash(artifact_sha256), normalization_status: "normalized",
-          received_at: run.started_at, endpoint_key: "product/stock/queryByVid",
-          adapter_version: run.adapter_version, payload_schema_version: 1).
+        SupplierObservation.joins(<<~SQL.squish).joins(<<~SQL.squish).
+          INNER JOIN sync_runs ON
+            sync_runs.supplier_id = supplier_observations.supplier_id AND
+            sync_runs.resource_kind = 'inventory' AND
+            sync_runs.status = 'succeeded' AND
+            sync_runs.mode = 'fixture' AND
+            sync_runs.scope_schema_version = 1 AND
+            sync_runs.points_consumed = 0 AND
+            sync_runs.error_count = 0 AND
+            sync_runs.adapter_version = supplier_observations.adapter_version AND
+            sync_runs.started_at = supplier_observations.received_at AND
+            sync_runs.completed_at = supplier_observations.received_at AND
+            sync_runs.scope_key = 'catalog-import:v1:inventory:' || encode(supplier_observations.payload_sha256, 'hex') AND
+            sync_runs.scope_json = jsonb_build_object(
+              'operation', 'inventory',
+              'external_resource_id', supplier_observations.external_resource_id,
+              'artifact_sha256', encode(supplier_observations.payload_sha256, 'hex')
+            )
+        SQL
+          INNER JOIN sync_checkpoints ON
+            sync_checkpoints.sync_run_id = sync_runs.id AND
+            sync_checkpoints.checkpoint_key = 'artifact_applied' AND
+            sync_checkpoints.cursor IS NULL AND
+            sync_checkpoints.page_number IS NULL AND
+            sync_checkpoints.state_schema_version = 1 AND
+            sync_checkpoints.state_json = jsonb_build_object(
+              'operation', 'inventory',
+              'external_resource_id', supplier_observations.external_resource_id,
+              'artifact_sha256', encode(supplier_observations.payload_sha256, 'hex'),
+              'subject_count', sync_runs.seen_count,
+              'status', 'applied'
+            )
+        SQL
+          where(supplier: context.supplier, resource_kind: "stock",
+            external_resource_id: context.external_resource_id, normalization_status: "normalized",
+            endpoint_key: "product/stock/queryByVid", payload_schema_version: 1).
+          where(<<~SQL.squish).
+            NOT EXISTS (
+              SELECT 1 FROM sync_checkpoints other_checkpoints
+              WHERE other_checkpoints.sync_run_id = sync_runs.id
+                AND other_checkpoints.id <> sync_checkpoints.id
+            )
+          SQL
           order(observed_at: :desc, id: :desc).first
       end
 
@@ -465,9 +486,11 @@ module Catalog
       end
 
       def without_sql_payload_logging(&block)
-        logger = ApplicationRecord.connection.logger
+        logger = ActiveRecord::Base.logger
         return yield unless logger
-        raise Error.new(:unsafe_sql_logger) unless logger.respond_to?(:silence)
+        unless logger.respond_to?(:silence) && (!logger.respond_to?(:silencer) || logger.silencer)
+          raise Error.new(:unsafe_sql_logger)
+        end
 
         logger.silence(Logger::ERROR, &block)
       end

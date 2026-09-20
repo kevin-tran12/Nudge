@@ -141,6 +141,20 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_equal before, durable_snapshot
   end
 
+  test "revalidates cached supplier key and adapter from the locked database row" do
+    Supplier.where(id: @supplier.id).update_all(key: "changed-after-cache")
+    before = durable_snapshot
+    assert_error(:supplier_mismatch) { import_product }
+    assert_equal before, durable_snapshot
+
+    Supplier.where(id: @supplier.id).update_all(key: "cj", adapter_version: "1")
+    @supplier.reload
+    Supplier.where(id: @supplier.id).update_all(adapter_version: "changed-after-cache")
+    before = durable_snapshot
+    assert_error(:supplier_mismatch) { import_product }
+    assert_equal before, durable_snapshot
+  end
+
   test "inventory rejects a manually assembled variant without prior product import evidence" do
     product = Product.create!(title: "Manual", description: "", status: "draft")
     variant = ProductVariant.create!(product:, title: "Manual", option_summary: {},
@@ -397,6 +411,31 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     end
   end
 
+  test "inventory freshness uses one bounded subject-chronology query with older applied history" do
+    import_product
+    20.times do |index|
+      observation = create_manual_stock_observation!(observed_at: RECEIVED_AT + index.seconds,
+        status: "normalized", suffix: "history-#{index}")
+      create_applied_success_for!(observation)
+    end
+    newer = fixture_json(:inventory)
+    newer["observed_at"] = "2026-09-20T00:00:21Z"
+    newer["response"]["requestId"] = "bounded-freshness"
+    queries = []
+    subscriber = lambda do |*, payload|
+      queries << payload.fetch(:sql) if payload.fetch(:sql).include?("JOIN sync_runs")
+    end
+
+    result = ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      @importer.call(supplier: @supplier, operation: :inventory,
+        artifact_bytes: JSON.generate(newer), received_at: RECEIVED_AT + 30.seconds, dry_run: true)
+    end
+
+    assert_equal({ seen: 3, created: 2, updated: 1, errors: 0 }, result.counts)
+    assert_equal 1, queries.size
+    assert_match(/ORDER BY.*observed_at.*DESC.*LIMIT/i, queries.sole)
+  end
+
   test "empty inventory still records explicit current unknown for the existing variant" do
     import_product
     empty = fixture_json(:inventory)
@@ -534,7 +573,7 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
   test "artifact content is filtered from model inspection and SQL logs" do
     io = StringIO.new
     logger = ActiveSupport::Logger.new(io, level: Logger::DEBUG)
-    with_sql_logger(logger) { import_product }
+    with_base_logger(logger) { import_product }
 
     refute_includes io.string, "Stacking storage bin"
     refute_includes io.string, "fixture-product-1"
@@ -550,7 +589,7 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     unsupported_logger.define_singleton_method(:level) { Logger::DEBUG }
     before = durable_snapshot
 
-    with_sql_logger(unsupported_logger) { assert_error(:unsafe_sql_logger) { import_product } }
+    with_base_logger(unsupported_logger) { assert_error(:unsafe_sql_logger) { import_product } }
     assert_equal before, durable_snapshot
   end
 
@@ -558,7 +597,7 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     io = StringIO.new
     logger = Logger.new(io, level: Logger::DEBUG)
 
-    with_sql_logger(logger) do
+    with_base_logger(logger) do
       if logger.respond_to?(:silence)
         import_product
       else
@@ -568,6 +607,22 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     refute_includes io.string, "Stacking storage bin"
     refute_includes io.string, "fixture-product-1"
     assert_equal Logger::DEBUG, logger.level
+  end
+
+
+  test "Active Support logger with silencing disabled fails closed before writes" do
+    io = StringIO.new
+    logger = ActiveSupport::Logger.new(io, level: Logger::DEBUG)
+    prior_silencer = logger.silencer
+    logger.silencer = false
+    before = durable_snapshot
+
+    with_base_logger(logger) { assert_error(:unsafe_sql_logger) { import_product } }
+    assert_equal before, durable_snapshot
+    refute_includes io.string, "Stacking storage bin"
+    refute_includes io.string, "fixture-product-1"
+  ensure
+    logger.silencer = prior_silencer if logger && !prior_silencer.nil?
   end
 
   private
@@ -624,11 +679,11 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
       end
     end
 
-    def create_manual_stock_observation!(observed_at:, status:)
+    def create_manual_stock_observation!(observed_at:, status:, suffix: status)
       SupplierObservation.create!(supplier: @supplier, resource_kind: "stock",
-        external_resource_id: "00005678", provider_request_id: "manual-#{status}",
+        external_resource_id: "00005678", provider_request_id: "manual-#{suffix}",
         endpoint_key: "product/stock/queryByVid", adapter_version: "1", payload_schema_version: 1,
-        payload_json: { "evidence" => status }, payload_sha256: Digest::SHA256.digest("manual-#{status}"),
+        payload_json: { "evidence" => suffix }, payload_sha256: Digest::SHA256.digest("manual-#{suffix}"),
         observed_at:, received_at: observed_at, normalization_status: status,
         normalization_error_code: ("manual_failure" if status == "failed"), purge_after: observed_at + 30.days)
     end
@@ -643,13 +698,19 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
         started_at: observation.received_at, completed_at: observation.received_at)
     end
 
-    def with_sql_logger(logger)
-      connection = ApplicationRecord.connection
-      prior_logger = connection.logger
-      connection.instance_variable_set(:@logger, logger)
+    def create_applied_success_for!(observation)
+      run = create_uncheckpointed_success_for!(observation)
+      run.sync_checkpoints.create!(checkpoint_key: "artifact_applied", state_schema_version: 1,
+        state_json: run.scope_json.merge("subject_count" => run.seen_count, "status" => "applied"))
+      run
+    end
+
+    def with_base_logger(logger)
+      prior_logger = ActiveRecord::Base.logger
+      ActiveRecord::Base.logger = logger
       yield
     ensure
-      connection&.instance_variable_set(:@logger, prior_logger)
+      ActiveRecord::Base.logger = prior_logger
     end
 
     def concurrently(*artifacts)
