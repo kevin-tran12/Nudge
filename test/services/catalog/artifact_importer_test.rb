@@ -327,7 +327,7 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
       artifact_bytes: JSON.generate(too_precise), received_at: RECEIVED_AT) }
 
     blank_title = fixture_json(:product)
-    blank_title["response"]["data"]["variants"][0]["variantNameEn"] = "   "
+    blank_title["response"]["data"]["productNameEn"] = "   "
     assert_error(:blank_title) { @importer.call(supplier: @supplier, operation: :product,
       artifact_bytes: JSON.generate(blank_title), received_at: RECEIVED_AT) }
 
@@ -340,6 +340,31 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_error(:artifact_budget_exceeded) { @importer.call(supplier: @supplier, operation: :product,
       artifact_bytes: JSON.generate(many), received_at: RECEIVED_AT) }
     assert_equal 0, Product.count
+  end
+
+  # CJ returned variantNameEn: "" on every variant of seven of twelve live
+  # pet-category products. The importer falls back through supplier-authored
+  # values rather than rejecting the product or inventing a name.
+  test "uses the supplier's own variant label when CJ leaves variantNameEn blank" do
+    blank = fixture_json(:product)
+    blank["response"]["data"]["variants"][0]["variantNameEn"] = "   "
+    blank["response"]["data"]["variants"][0]["variantKey"] = "Yellow-Small size"
+    @importer.call(supplier: @supplier, operation: :product,
+      artifact_bytes: JSON.generate(blank), received_at: RECEIVED_AT)
+
+    variant = SupplierVariant.find_by!(external_variant_id: "00005678").product_variant
+    assert_equal "Yellow-Small size", variant.title
+  end
+
+  test "falls back to the product title when the supplier names the variant nowhere" do
+    blank = fixture_json(:product)
+    blank["response"]["data"]["variants"][0]["variantNameEn"] = "   "
+    blank["response"]["data"]["variants"][0]["variantKey"] = nil
+    @importer.call(supplier: @supplier, operation: :product,
+      artifact_bytes: JSON.generate(blank), received_at: RECEIVED_AT)
+
+    variant = SupplierVariant.find_by!(external_variant_id: "00005678").product_variant
+    assert_equal "Stacking storage bin", variant.title
   end
 
   test "accepts exact decimal and title boundaries without database rounding" do

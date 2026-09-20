@@ -12,8 +12,13 @@ module Integrations
       SINGLE_PRICE = /\A\s*\d+(?:\.\d+)?\s*\z/
       MAX_LIST_ITEMS = 200
       # oss-cf.cjdropshipping.com verified against live CJ product detail responses.
+      # Surveyed across roughly 250 products in five categories on 2026-09-20.
+      # Exact hosts, never a wildcard: *.cjdropshipping.com would be defensible
+      # as first-party, but *.aliyuncs.com is shared bucket hosting and a
+      # wildcard there would admit any Aliyun customer's bucket.
       MEDIA_HOSTS = %w[cf.cjdropshipping.com oss-cf.cjdropshipping.com
-        cc-west-usa.oss-us-west-1.aliyuncs.com].freeze
+        oss.cjdropshipping.com cc-west-usa.oss-us-west-1.aliyuncs.com
+        cj-product-center.oss-accelerate.aliyuncs.com].freeze
       ENDPOINTS = { product: "product/query", inventory: "product/stock/queryByVid", freight: "logistic/freightCalculate",
         product_list: "product/list" }.freeze
 
@@ -59,6 +64,7 @@ module Integrations
           invalid! unless identifier(row["pid"]) == product_id
           Contracts::Variant.new(external_id: identifier(row["vid"]), product_id: product_id,
             sku: optional_reference(row["variantSku"]), title: optional_text(row["variantNameEn"]),
+            option_label: optional_text(row["variantKey"]),
             price: money(row["variantSellPrice"]), weight: measurement(row["variantWeight"], "g"),
             length: measurement(row["variantLength"], "mm"), width: measurement(row["variantWidth"], "mm"),
             height: measurement(row["variantHeight"], "mm"))
@@ -184,12 +190,23 @@ module Integrations
           text(value, limit: 200).tap { |id| invalid! unless id.match?(/\A[A-Za-z0-9_{}-]+\z/) }
         end
 
+        # CJ writes absence two ways: a missing key and an empty string. Seven of
+        # twelve live pet-category products carried variantNameEn: "" on every
+        # variant, and the required-text rule rejected each as malformed. A blank
+        # is the supplier declining to fill the field, so it normalizes to nil --
+        # reported downstream as unknown -- and never to an empty title that
+        # would read as a real, if uninformative, value. Only the optional
+        # readers do this: a blank where a field is required is still malformed.
+        def blank?(value)
+          value.is_a?(String) && value.match?(/\A[[:space:]]*\z/)
+        end
+
         def optional_text(value, limit: 200)
-          value.nil? ? nil : plain_text(value, limit: limit)
+          value.nil? || blank?(value) ? nil : plain_text(value, limit: limit)
         end
 
         def optional_reference(value)
-          value.nil? ? nil : String.new(text(value, limit: 200))
+          value.nil? || blank?(value) ? nil : String.new(text(value, limit: 200))
         end
 
         def plain_text(value, limit:)

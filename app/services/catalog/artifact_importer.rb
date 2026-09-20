@@ -164,7 +164,7 @@ module Catalog
         image_urls = validate_media_urls!(value.image_urls)
         variants = value.variants.map do |variant|
           ensure_decimal_measurements!(variant)
-          { value: variant, title: normalized_title(variant.title) }
+          { value: variant, title: variant_title(variant, title) }
         end
 
         supplier_product = SupplierProduct.find_by(supplier: context.supplier,
@@ -355,6 +355,20 @@ module Catalog
         end
 
         existing.each_value(&:destroy!)
+      end
+
+      # A variant needs a title the catalog can display, and CJ does not
+      # reliably give one: seven of twelve live pet-category products returned
+      # variantNameEn: "" on every variant. Rather than reject those products or
+      # invent a name, fall back through the supplier's own values in order of
+      # specificity -- the English variant name, then variantKey, the label CJ
+      # uses for the option itself ("Yellow-Small size"), then the product's
+      # title, which is literally what CJ puts in variantNameEn on the products
+      # that do populate it. Every candidate is supplier-authored; nothing here
+      # is derived or guessed. If all three are blank the import still fails.
+      def variant_title(variant, product_title)
+        candidate = [ variant.title, variant.option_label ].find { |value| value&.strip.present? }
+        candidate.nil? ? product_title : normalized_title(candidate)
       end
 
       def normalized_title(value)

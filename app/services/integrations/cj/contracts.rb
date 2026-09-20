@@ -7,7 +7,8 @@ module Integrations
       Money = Data.define(:amount_minor, :currency)
       Measurement = Data.define(:value, :unit)
       Product = Data.define(:external_id, :sku, :title, :description, :image_urls, :variants)
-      Variant = Data.define(:external_id, :product_id, :sku, :title, :price, :weight, :length, :width, :height)
+      Variant = Data.define(:external_id, :product_id, :sku, :title, :option_label, :price, :weight,
+        :length, :width, :height)
       Inventory = Data.define(:variant_id, :warehouse_id, :country_code,
         :total_quantity, :cj_quantity, :factory_quantity, :subwarehouses)
       Subwarehouse = Data.define(:external_id, :cj_quantity, :factory_quantity)
