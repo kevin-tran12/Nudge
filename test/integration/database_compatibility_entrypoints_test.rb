@@ -5,7 +5,69 @@ require "securerandom"
 require "socket"
 
 class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
-  MIGRATION_VERSION = "20260920000001"
+  MIGRATION_VERSIONS = Rails.root.glob("db/migrate/*.rb").map { |path| path.basename.to_s.split("_").first }.freeze
+  IDENTITY_MIGRATION_VERSION = "20260920000002"
+  IDENTITY_TABLES = %w[
+    agent_provider_sessions
+    ai_access_grants
+    turnstile_verifications
+    consent_records
+    shopping_sessions
+    external_identities
+    users
+  ].freeze
+
+  test "identity migration rolls back completely and recreates its canonical schema on redo" do
+    with_database do |database, connection|
+      Tempfile.create([ "db02-rollback", ".sql" ]) do |structure|
+        assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{IDENTITY_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        IDENTITY_TABLES.each do |table|
+          assert_nil connection.exec_params("SELECT to_regclass($1)", [ "public.#{table}" ]).getvalue(0, 0), table
+        end
+        assert_equal "0", connection.exec_params(<<~SQL).getvalue(0, 0)
+          SELECT count(*)
+          FROM pg_constraint
+          WHERE conname LIKE 'fk_ai_grants_%'
+             OR conname LIKE 'fk_agent_provider_sessions_%'
+        SQL
+
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:redo",
+          "VERSION=#{IDENTITY_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        IDENTITY_TABLES.each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+        assert_equal "1", connection.exec_params(<<~SQL).getvalue(0, 0)
+          SELECT count(*)
+          FROM pg_constraint
+          WHERE conname = 'fk_ai_grants_turnstile_session'
+        SQL
+
+        assert_command_succeeds run_rails(database, "db:schema:dump", schema: structure.path)
+        assert_includes File.read(structure.path), Nudge::DatabaseCompatibility::PGVECTOR_STRUCTURE_STATEMENT
+
+        with_database do |load_database, load_connection|
+          assert_command_succeeds run_rails(load_database, "db:schema:load", schema: structure.path)
+          IDENTITY_TABLES.each do |table|
+            assert_equal table, load_connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+          end
+          assert_equal "0.8.5", load_connection.exec(<<~SQL).getvalue(0, 0)
+            SELECT extversion FROM pg_extension WHERE extname = 'vector'
+          SQL
+        end
+      end
+    end
+  end
 
   test "schema load rejects an existing wrong pgvector version before stamping the migration" do
     with_database do |database, connection|
@@ -109,11 +171,20 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
 
   def stamp_migration(connection)
     connection.exec("CREATE TABLE schema_migrations (version character varying PRIMARY KEY)")
-    connection.exec_params("INSERT INTO schema_migrations (version) VALUES ($1)", [ MIGRATION_VERSION ])
+    MIGRATION_VERSIONS.each do |version|
+      connection.exec_params("INSERT INTO schema_migrations (version) VALUES ($1)", [ version ])
+    end
   end
 
-  def run_rails(database, *arguments)
-    Open3.capture3(command_environment(database), Rails.root.join("bin/rails").to_s, *arguments)
+  def run_rails(database, *arguments, schema: nil)
+    environment = command_environment(database)
+    environment["SCHEMA"] = schema if schema
+    Open3.capture3(environment, Rails.root.join("bin/rails").to_s, *arguments)
+  end
+
+  def assert_command_succeeds(result)
+    stdout, stderr, status = result
+    assert_predicate status, :success?, stdout + stderr
   end
 
   def run_entrypoint(database, host: nil, port: nil)
