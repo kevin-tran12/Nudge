@@ -49,7 +49,10 @@ class CjTransportTest < ActiveSupport::TestCase
 
     assert_equal '{"code":200,"result":true}', body
     assert_equal "synthetic-token", seen_request["CJ-Access-Token"]
-    assert_equal "/api2.0/v1/product/query", seen_request.path
+    # Verified against the live provider: product/query is a GET keyed on pid,
+    # so the domain key product_id is translated at the wire boundary.
+    assert_equal "/api2.0/v1/product/query?pid=1", seen_request.path
+    assert_kind_of Net::HTTP::Get, seen_request
   end
 
   test "call rejects an invalid token without building a request" do
