@@ -46,12 +46,12 @@ FROM build AS development
 ENV HOME=/home/rails \
     RAILS_ENV=development
 
-RUN chown -R rails:rails log storage tmp app/assets/builds
+RUN chown -R rails:rails log storage tmp app/assets/builds public/assets
 
 USER 1000:1000
 
 ENTRYPOINT ["/rails/bin/docker-entrypoint"]
-CMD ["bin/rails", "server", "-b", "0.0.0.0"]
+CMD ["bin/dev", "-b", "0.0.0.0"]
 
 FROM base AS runtime
 

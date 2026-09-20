@@ -34,6 +34,9 @@ jobs:
       - name: Build development image
         run: docker compose build app
 
+      - name: Verify development asset lifecycle
+        run: docker compose run --rm --no-deps app ruby test/runtime/development_assets_contract.rb
+
       - name: Start database
         run: docker compose up --detach --wait db
 
