@@ -64,6 +64,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           WHERE conname = 'fk_products_primary_category_membership'
         SQL
         assert_equal({ "condeferrable" => "t", "condeferred" => "t" }, deferred)
+        assert_measurement_nan_guards connection
 
         assert_command_succeeds run_rails(database, "db:schema:dump", schema: structure.path)
         dumped = File.read(structure.path)
@@ -83,6 +84,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
             FROM pg_constraint
             WHERE conname = 'fk_products_primary_category_membership'
           SQL
+          assert_measurement_nan_guards load_connection
         end
       end
     end
@@ -205,6 +207,20 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
   end
 
   private
+
+  def assert_measurement_nan_guards(connection)
+    %w[
+      product_variants_measurements_nonnegative_check
+      supplier_variants_measurements_nonnegative_check
+    ].each do |constraint|
+      definition = connection.exec_params(<<~SQL, [ constraint ]).getvalue(0, 0)
+        SELECT pg_get_constraintdef(oid)
+        FROM pg_constraint
+        WHERE conname = $1
+      SQL
+      assert_includes definition, "<> 'NaN'::numeric", constraint
+    end
+  end
 
   def with_database
     database = "nudge_db01_#{SecureRandom.hex(6)}_test"

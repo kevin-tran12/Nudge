@@ -119,6 +119,51 @@ class CatalogCoreSchemaTest < ActiveSupport::TestCase
     assert_constraint { insert_product_variant(product_id: product_id, sku: "dimension-only", length_value: 1) }
     assert_constraint { insert_product_variant(product_id: product_id, sku: "dimension-unit-only", dimension_unit: "cm") }
     assert insert_product_variant(product_id: product_id, sku: "partial-dimensions", length_value: 1, dimension_unit: "cm")
+    assert insert_product_variant(
+      product_id: product_id,
+      sku: "zero-measurements",
+      weight_value: 0,
+      weight_unit: "g",
+      length_value: 0,
+      width_value: 0,
+      height_value: 0,
+      dimension_unit: "cm"
+    )
+  end
+
+  test "rejects NaN in every canonical and supplier measurement column" do
+    product_id = insert_product
+    product_variant_id = insert_product_variant(
+      product_id: product_id,
+      weight_value: 1,
+      weight_unit: "g",
+      length_value: 1,
+      width_value: 2,
+      height_value: 3,
+      dimension_unit: "cm"
+    )
+
+    %w[weight_value length_value width_value height_value].each do |column|
+      assert_constraint { execute("UPDATE product_variants SET #{column} = 'NaN'::numeric WHERE id = #{product_variant_id}") }
+    end
+
+    supplier_id = insert_supplier
+    supplier_product_id = insert_supplier_product(supplier_id: supplier_id, product_id: product_id)
+    supplier_variant_id = insert_supplier_variant(
+      supplier_id: supplier_id,
+      product_variant_id: product_variant_id,
+      supplier_product_id: supplier_product_id,
+      weight_value: 1,
+      weight_unit: "g",
+      length_value: 1,
+      width_value: 2,
+      height_value: 3,
+      dimension_unit: "cm"
+    )
+
+    %w[weight_value length_value width_value height_value].each do |column|
+      assert_constraint { execute("UPDATE supplier_variants SET #{column} = 'NaN'::numeric WHERE id = #{supplier_variant_id}") }
+    end
   end
 
   test "keeps supplier identifiers scoped, opaque, and race safe" do
@@ -180,6 +225,28 @@ class CatalogCoreSchemaTest < ActiveSupport::TestCase
       weight_value: 100,
       weight_unit: "g",
       width_value: 2,
+      dimension_unit: "cm"
+    )
+
+    null_variant_id = insert_product_variant(product_id: product_id, sku: "supplier-null")
+    assert insert_supplier_variant(
+      supplier_id: supplier_id,
+      product_variant_id: null_variant_id,
+      supplier_product_id: supplier_product_id,
+      external_id: "supplier-null"
+    )
+
+    zero_variant_id = insert_product_variant(product_id: product_id, sku: "supplier-zero")
+    assert insert_supplier_variant(
+      supplier_id: supplier_id,
+      product_variant_id: zero_variant_id,
+      supplier_product_id: supplier_product_id,
+      external_id: "supplier-zero",
+      weight_value: 0,
+      weight_unit: "g",
+      length_value: 0,
+      width_value: 0,
+      height_value: 0,
       dimension_unit: "cm"
     )
   end
@@ -254,15 +321,16 @@ class CatalogCoreSchemaTest < ActiveSupport::TestCase
     SQL
   end
 
-  def insert_product_variant(product_id:, sku: "sku", option_schema_version: 1, weight_value: nil, weight_unit: nil, length_value: nil, dimension_unit: nil)
+  def insert_product_variant(product_id:, sku: "sku", option_schema_version: 1, weight_value: nil, weight_unit: nil, length_value: nil, width_value: nil, height_value: nil, dimension_unit: nil)
     insert_returning <<~SQL.squish
       INSERT INTO product_variants
         (product_id, canonical_sku, title, option_schema_version, weight_value, weight_unit,
-         length_value, dimension_unit, created_at, updated_at)
+         length_value, width_value, height_value, dimension_unit, created_at, updated_at)
       VALUES
         (#{product_id}, #{q(sku)}, 'Variant', #{option_schema_version}, #{weight_value || "NULL"},
-         #{weight_unit ? q(weight_unit) : "NULL"}, #{length_value || "NULL"},
-         #{dimension_unit ? q(dimension_unit) : "NULL"}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+         #{weight_unit ? q(weight_unit) : "NULL"}, #{length_value || "NULL"}, #{width_value || "NULL"},
+         #{height_value || "NULL"}, #{dimension_unit ? q(dimension_unit) : "NULL"},
+         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     SQL
   end
 

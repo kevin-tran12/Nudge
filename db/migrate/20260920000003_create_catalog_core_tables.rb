@@ -249,10 +249,10 @@ class CreateCatalogCoreTables < ActiveRecord::Migration[8.1]
 
   def add_measurement_constraints(table)
     add_check_constraint table,
-      "(weight_value IS NULL OR weight_value >= 0) AND " \
-        "(length_value IS NULL OR length_value >= 0) AND " \
-        "(width_value IS NULL OR width_value >= 0) AND " \
-        "(height_value IS NULL OR height_value >= 0)",
+      "(weight_value IS NULL OR (weight_value <> 'NaN'::numeric AND weight_value >= 0)) AND " \
+        "(length_value IS NULL OR (length_value <> 'NaN'::numeric AND length_value >= 0)) AND " \
+        "(width_value IS NULL OR (width_value <> 'NaN'::numeric AND width_value >= 0)) AND " \
+        "(height_value IS NULL OR (height_value <> 'NaN'::numeric AND height_value >= 0))",
       name: "#{table}_measurements_nonnegative_check"
     add_check_constraint table,
       "(weight_value IS NULL) = (weight_unit IS NULL)",

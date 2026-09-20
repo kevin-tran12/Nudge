@@ -357,7 +357,7 @@ CREATE TABLE public.product_variants (
     updated_at timestamp(6) with time zone NOT NULL,
     CONSTRAINT product_variants_dimension_unit_check CHECK (((dimension_unit IS NULL) = ((length_value IS NULL) AND (width_value IS NULL) AND (height_value IS NULL)))),
     CONSTRAINT product_variants_lock_version_check CHECK ((lock_version >= 0)),
-    CONSTRAINT product_variants_measurements_nonnegative_check CHECK ((((weight_value IS NULL) OR (weight_value >= (0)::numeric)) AND ((length_value IS NULL) OR (length_value >= (0)::numeric)) AND ((width_value IS NULL) OR (width_value >= (0)::numeric)) AND ((height_value IS NULL) OR (height_value >= (0)::numeric)))),
+    CONSTRAINT product_variants_measurements_nonnegative_check CHECK ((((weight_value IS NULL) OR ((weight_value <> 'NaN'::numeric) AND (weight_value >= (0)::numeric))) AND ((length_value IS NULL) OR ((length_value <> 'NaN'::numeric) AND (length_value >= (0)::numeric))) AND ((width_value IS NULL) OR ((width_value <> 'NaN'::numeric) AND (width_value >= (0)::numeric))) AND ((height_value IS NULL) OR ((height_value <> 'NaN'::numeric) AND (height_value >= (0)::numeric))))),
     CONSTRAINT product_variants_option_object_check CHECK ((jsonb_typeof(option_summary) = 'object'::text)),
     CONSTRAINT product_variants_option_version_check CHECK ((option_schema_version > 0)),
     CONSTRAINT product_variants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'unavailable'::text, 'retired'::text]))),
@@ -549,7 +549,7 @@ CREATE TABLE public.supplier_variants (
     created_at timestamp(6) with time zone NOT NULL,
     updated_at timestamp(6) with time zone NOT NULL,
     CONSTRAINT supplier_variants_dimension_unit_check CHECK (((dimension_unit IS NULL) = ((length_value IS NULL) AND (width_value IS NULL) AND (height_value IS NULL)))),
-    CONSTRAINT supplier_variants_measurements_nonnegative_check CHECK ((((weight_value IS NULL) OR (weight_value >= (0)::numeric)) AND ((length_value IS NULL) OR (length_value >= (0)::numeric)) AND ((width_value IS NULL) OR (width_value >= (0)::numeric)) AND ((height_value IS NULL) OR (height_value >= (0)::numeric)))),
+    CONSTRAINT supplier_variants_measurements_nonnegative_check CHECK ((((weight_value IS NULL) OR ((weight_value <> 'NaN'::numeric) AND (weight_value >= (0)::numeric))) AND ((length_value IS NULL) OR ((length_value <> 'NaN'::numeric) AND (length_value >= (0)::numeric))) AND ((width_value IS NULL) OR ((width_value <> 'NaN'::numeric) AND (width_value >= (0)::numeric))) AND ((height_value IS NULL) OR ((height_value <> 'NaN'::numeric) AND (height_value >= (0)::numeric))))),
     CONSTRAINT supplier_variants_seen_time_check CHECK ((last_seen_at >= first_seen_at)),
     CONSTRAINT supplier_variants_sync_time_check CHECK (((last_synced_at IS NULL) OR (last_synced_at >= last_seen_at))),
     CONSTRAINT supplier_variants_weight_unit_pair_check CHECK (((weight_value IS NULL) = (weight_unit IS NULL)))
