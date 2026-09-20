@@ -1,5 +1,6 @@
 require "test_helper"
 require "erb"
+require "open3"
 
 class RuntimeContractTest < ActiveSupport::TestCase
   test "application commands run as a non-root user" do
@@ -33,5 +34,48 @@ class RuntimeContractTest < ActiveSupport::TestCase
   ensure
     ENV["DEVELOPMENT_DATABASE_NAME"] = previous_development
     ENV["TEST_DATABASE_NAME"] = previous_test
+  end
+
+  test "test boot rejects DATABASE_URL targeting the development database before application code runs" do
+    environment = {
+      "RAILS_ENV" => "test",
+      "DATABASE_URL" => "postgresql://nudge:local@unreachable.invalid/nudge_development",
+      "PROVIDER_MODE" => "fixture",
+      "CJ_MODE" => "fixture"
+    }
+    stdout, stderr, status = Open3.capture3(
+      environment,
+      Rails.root.join("bin/rails").to_s,
+      "runner",
+      "puts 'DATABASE_QUERY_REACHED'; ActiveRecord::Base.connection.select_value('SELECT 1')"
+    )
+
+    refute_predicate status, :success?
+    refute_includes stdout, "DATABASE_QUERY_REACHED"
+    assert_includes stderr, "Development and test must use different databases"
+    refute_match(/could not translate host name|connection.*failed/i, stderr)
+  end
+
+  test "production boot preserves DATABASE_URL without connecting during isolation validation" do
+    environment = {
+      "RAILS_ENV" => "production",
+      "DATABASE_URL" => "postgresql://nudge:local@unreachable.invalid/nudge_production",
+      "SECRET_KEY_BASE_DUMMY" => "1"
+    }
+    script = <<~RUBY
+      config = ActiveRecord::Base.configurations.configs_for(env_name: "production", name: "primary")
+      abort unless config.database == "nudge_production"
+      puts config.database
+    RUBY
+    stdout, stderr, status = Open3.capture3(
+      environment,
+      Rails.root.join("bin/rails").to_s,
+      "runner",
+      script
+    )
+
+    assert_predicate status, :success?, stderr
+    assert_includes stdout, "nudge_production"
+    refute_match(/could not translate host name|connection.*failed/i, stderr)
   end
 end
