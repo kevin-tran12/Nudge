@@ -111,7 +111,7 @@ class CjAdapterContractTest < ActiveSupport::TestCase
     id = +"00005678"
     Integrations::Cj::Adapter.new.inventory(variant_id: id)
     refute id.frozen?
-    body = JSON.parse(FIXTURES.join("inventory.json").read).fetch("response")
+    body = inventory_body
     body["data"][0]["areaId"] = 1
     result = Integrations::Cj::Normalizer.new.call(operation: :inventory, body: JSON.generate(body),
       request: { "variant_id" => id }, observed_at: "2026-09-20T00:00:00Z")
@@ -209,7 +209,7 @@ class CjAdapterContractTest < ActiveSupport::TestCase
   end
 
   test "inventory corruption does not become missing or zero stock" do
-    base = JSON.parse(FIXTURES.join("inventory.json").read).fetch("response")
+    base = inventory_body
     [ -1, "9", 1.5 ].each do |quantity|
       body = base.deep_dup
       body["data"][0]["totalInventoryNum"] = quantity
@@ -249,7 +249,18 @@ class CjAdapterContractTest < ActiveSupport::TestCase
     end
 
     def product_body
-      JSON.parse(FIXTURES.join("product.json").read).fetch("response")
+      fixture_entry("product", "product_id" => "00001234").fetch("response")
+    end
+
+    def inventory_body
+      fixture_entry("inventory", "variant_id" => "00005678").fetch("response")
+    end
+
+    # v2 fixture files hold a collection of request/response entries; find the
+    # one matching the given request, the same lookup FixtureSource performs.
+    def fixture_entry(operation, request)
+      fixture = JSON.parse(FIXTURES.join("#{operation}.json").read)
+      fixture.fetch("entries").find { |entry| entry.fetch("request") == request }
     end
 
     def normalize(body)

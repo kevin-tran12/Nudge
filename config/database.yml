@@ -62,3 +62,9 @@ test:
 production:
   <<: *default
   url: <%= ENV["DATABASE_URL"] %>
+
+# Staging is the production-shaped demonstration deployment and, like production,
+# takes its connection entirely from DATABASE_URL supplied by the runtime.
+staging:
+  <<: *default
+  url: <%= ENV["DATABASE_URL"] %>

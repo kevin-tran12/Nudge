@@ -11,6 +11,10 @@
     <%= render "shared/notice", title: "Sample catalog", message: "Products, prices, and availability are illustrative fixture data. They are not live supplier offers.", tone: :warning %>
   </div>
 
+  <div class="mt-8">
+    <%= render "shared/voice_launcher" %>
+  </div>
+
   <% if @page.items.any? %>
     <div class="mt-8 grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
       <%= render partial: "shared/catalog/product_card", collection: @page.items, as: :product %>

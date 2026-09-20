@@ -65,7 +65,9 @@ class CatalogBrowsingTest < ApplicationSystemTestCase
   end
 
   test "empty and not found states remain navigable" do
-    visit products_path(cursor: "1")
+    # The fixture catalog now holds 8 products (CAT-FIX-01); a cursor past
+    # the last item, not "1", is what now yields an empty page.
+    visit products_path(cursor: Catalog::FixtureProductReader::DEFAULT_PRODUCT_IDS.size.to_s)
     assert_selector "h1", text: "Browse the sample catalog"
     assert_selector "h2", text: "No sample products on this page"
 
