@@ -105,26 +105,32 @@ class DatabaseProductReaderTest < ActiveSupport::TestCase
   end
 
   test "an image url on a non approved host is rejected rather than returned" do
-    import_product("00001234")
-    product_record = Product.find_by!(title: "Stacking storage bin")
+    import_product("00002007")
+    product_record = Product.find_by!(title: "Mesh pen and stationery cup")
     CatalogMedia.create!(product: product_record, kind: "image", status: "active", position: 0,
       sanitized_url: "https://supplier.example/private.jpg")
 
     assert_catalog_error(:source_unavailable) { @reader.detail(id: product_record.public_id) }
   end
 
-  test "an approved-host image url is returned and a product with no media stays explicitly unknown" do
-    import_product("00001234")
-    product_record = Product.find_by!(title: "Stacking storage bin")
-    no_media = @reader.detail(id: product_record.public_id)
+  test "an imported product's approved-host images come back known, and one with none stays explicitly unknown" do
+    # 00002007 carries no productImageSet in the CJ fixture, so ArtifactImporter
+    # writes no catalog_media rows for it and the reader must report :unknown,
+    # never a fabricated empty-but-known state.
+    import_product("00002007")
+    no_media = @reader.detail(id: Product.find_by!(title: "Mesh pen and stationery cup").public_id)
     assert_equal :unknown, no_media.images_state
     assert_empty no_media.images
 
-    CatalogMedia.create!(product: product_record, kind: "image", status: "active", position: 0,
-      sanitized_url: "https://cf.cjdropshipping.com/fixture/storage-bin.jpg")
-    with_media = @reader.detail(id: product_record.public_id)
+    # 00001234 carries a single approved-host productImageSet entry.
+    # ArtifactImporter (CAT-MEDIA-01) persists it to catalog_media on import,
+    # with no manual row insertion here, proving the importer and reader
+    # halves of the CAT-DB-READER-01/CAT-MEDIA-01 seam actually connect.
+    import_product("00001234")
+    with_media = @reader.detail(id: Product.find_by!(title: "Stacking storage bin").public_id)
     assert_equal :known, with_media.images_state
     assert_equal [ "https://cf.cjdropshipping.com/fixture/storage-bin.jpg" ], with_media.images.map(&:url)
+    assert_equal [ 0 ], with_media.images.map(&:position)
   end
 
   test "an instruction-injection string stored by the importer comes back as inert plain text" do
