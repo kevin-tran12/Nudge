@@ -87,6 +87,9 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     with_database do |database, connection|
       Tempfile.create([ "db04-rollback", ".sql" ]) do |structure|
         assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+        # DB-06 adds foreign keys into product_facts/price_observations/inventory_observations/
+        # supplier_observations, so it must be rolled back before DB-04 can drop those tables.
+        assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}", schema: structure.path)
         assert_command_succeeds run_rails(database, "db:migrate:down", "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}", schema: structure.path)
 
         CATALOG_EVIDENCE_TABLES.each do |table|
@@ -102,6 +105,7 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
         SQL
 
         assert_command_succeeds run_rails(database, "db:migrate:redo", "VERSION=#{CATALOG_EVIDENCE_MIGRATION_VERSION}", schema: structure.path)
+        assert_command_succeeds run_rails(database, "db:migrate:up", "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}", schema: structure.path)
         CATALOG_EVIDENCE_TABLES.each do |table|
           assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
         end
@@ -185,6 +189,14 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     with_database do |database, connection|
       Tempfile.create([ "db03-rollback", ".sql" ]) do |structure|
         assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+        # DB-06 adds foreign keys into products/product_variants (via recommendation_candidates)
+        # and into DB-04's catalog evidence tables, so it must roll back before either does.
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}",
+          schema: structure.path
+        )
         assert_command_succeeds run_rails(
           database,
           "db:migrate:down",
@@ -232,6 +244,12 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           "VERSION=#{SEARCH_MIGRATION_VERSION}",
           schema: structure.path
         )
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:up",
+          "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}",
+          schema: structure.path
+        )
         CATALOG_TABLES.each do |table|
           assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
         end
@@ -272,6 +290,14 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
       Tempfile.create([ "db02-rollback", ".sql" ]) do |structure|
         assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
 
+        # DB-06's agent_runs has composite foreign keys into ai_access_grants and
+        # agent_provider_sessions, so it must roll back before DB-02 can drop those tables.
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}",
+          schema: structure.path
+        )
         assert_command_succeeds run_rails(
           database,
           "db:migrate:down",
@@ -292,6 +318,12 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
           database,
           "db:migrate:redo",
           "VERSION=#{IDENTITY_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:up",
+          "VERSION=#{SHOPPING_DECISIONS_MIGRATION_VERSION}",
           schema: structure.path
         )
         IDENTITY_TABLES.each do |table|

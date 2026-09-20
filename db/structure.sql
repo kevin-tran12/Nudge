@@ -642,6 +642,93 @@ ALTER SEQUENCE public.eligibility_results_id_seq OWNED BY public.eligibility_res
 
 
 --
+-- Name: embedding_models; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.embedding_models (
+    id bigint NOT NULL,
+    provider text NOT NULL,
+    key text NOT NULL,
+    model_revision text NOT NULL,
+    dimensions integer NOT NULL,
+    distance_metric text NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    configuration_hash bytea NOT NULL,
+    activated_at timestamp(6) with time zone,
+    retired_at timestamp(6) with time zone,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT embedding_models_configuration_hash_check CHECK ((octet_length(configuration_hash) = 32)),
+    CONSTRAINT embedding_models_dimensions_check CHECK ((dimensions > 0)),
+    CONSTRAINT embedding_models_distance_metric_check CHECK ((distance_metric = ANY (ARRAY['cosine'::text, 'l2'::text, 'inner_product'::text]))),
+    CONSTRAINT embedding_models_retirement_after_activation_check CHECK (((activated_at IS NULL) OR (retired_at IS NULL) OR (retired_at >= activated_at))),
+    CONSTRAINT embedding_models_retirement_state_check CHECK (((status = 'retired'::text) = (retired_at IS NOT NULL))),
+    CONSTRAINT embedding_models_status_check CHECK ((status = ANY (ARRAY['active'::text, 'retired'::text])))
+);
+
+
+--
+-- Name: embedding_models_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.embedding_models_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: embedding_models_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.embedding_models_id_seq OWNED BY public.embedding_models.id;
+
+
+--
+-- Name: embeddings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.embeddings (
+    id bigint NOT NULL,
+    search_document_id bigint NOT NULL,
+    embedding_model_id bigint NOT NULL,
+    value public.vector NOT NULL,
+    dimensions integer NOT NULL,
+    content_hash bytea NOT NULL,
+    generated_at timestamp(6) with time zone NOT NULL,
+    status text DEFAULT 'active'::text NOT NULL,
+    error_code text,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    CONSTRAINT embeddings_content_hash_check CHECK ((octet_length(content_hash) = 32)),
+    CONSTRAINT embeddings_dimension_check CHECK (((dimensions > 0) AND (public.vector_dims(value) = dimensions))),
+    CONSTRAINT embeddings_error_state_check CHECK (((status = 'failed'::text) = (error_code IS NOT NULL))),
+    CONSTRAINT embeddings_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'superseded'::text, 'failed'::text])))
+);
+
+
+--
+-- Name: embeddings_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.embeddings_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: embeddings_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.embeddings_id_seq OWNED BY public.embeddings.id;
+
+
+--
 -- Name: external_identities; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1207,6 +1294,49 @@ ALTER SEQUENCE public.requirements_id_seq OWNED BY public.requirements.id;
 CREATE TABLE public.schema_migrations (
     version character varying NOT NULL
 );
+
+
+--
+-- Name: search_documents; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.search_documents (
+    id bigint NOT NULL,
+    product_id bigint,
+    product_variant_id bigint,
+    document_kind text NOT NULL,
+    locale text DEFAULT 'en'::text NOT NULL,
+    normalized_text text NOT NULL,
+    content_hash bytea NOT NULL,
+    source_version text NOT NULL,
+    status text NOT NULL,
+    generated_at timestamp(6) with time zone NOT NULL,
+    created_at timestamp(6) with time zone NOT NULL,
+    updated_at timestamp(6) with time zone NOT NULL,
+    search_vector tsvector GENERATED ALWAYS AS (to_tsvector('english'::regconfig, normalized_text)) STORED,
+    CONSTRAINT search_documents_content_hash_check CHECK ((octet_length(content_hash) = 32)),
+    CONSTRAINT search_documents_status_check CHECK ((status = ANY (ARRAY['active'::text, 'superseded'::text]))),
+    CONSTRAINT search_documents_subject_check CHECK ((num_nonnulls(product_id, product_variant_id) = 1))
+);
+
+
+--
+-- Name: search_documents_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.search_documents_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: search_documents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.search_documents_id_seq OWNED BY public.search_documents.id;
 
 
 --
@@ -1820,6 +1950,20 @@ ALTER TABLE ONLY public.eligibility_results ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
+-- Name: embedding_models id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embedding_models ALTER COLUMN id SET DEFAULT nextval('public.embedding_models_id_seq'::regclass);
+
+
+--
+-- Name: embeddings id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeddings ALTER COLUMN id SET DEFAULT nextval('public.embeddings_id_seq'::regclass);
+
+
+--
 -- Name: external_identities id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1901,6 +2045,13 @@ ALTER TABLE ONLY public.recommendation_runs ALTER COLUMN id SET DEFAULT nextval(
 --
 
 ALTER TABLE ONLY public.requirements ALTER COLUMN id SET DEFAULT nextval('public.requirements_id_seq'::regclass);
+
+
+--
+-- Name: search_documents id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.search_documents ALTER COLUMN id SET DEFAULT nextval('public.search_documents_id_seq'::regclass);
 
 
 --
@@ -2068,6 +2219,22 @@ ALTER TABLE ONLY public.eligibility_results
 
 
 --
+-- Name: embedding_models embedding_models_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embedding_models
+    ADD CONSTRAINT embedding_models_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: embeddings embeddings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeddings
+    ADD CONSTRAINT embeddings_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: external_identities external_identities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -2169,6 +2336,14 @@ ALTER TABLE ONLY public.requirements
 
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
+
+
+--
+-- Name: search_documents search_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.search_documents
+    ADD CONSTRAINT search_documents_pkey PRIMARY KEY (id);
 
 
 --
@@ -2590,6 +2765,41 @@ CREATE UNIQUE INDEX index_eligibility_results_unique_candidate_requirement ON pu
 
 
 --
+-- Name: index_embedding_models_identity; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_embedding_models_identity ON public.embedding_models USING btree (provider, key, model_revision, configuration_hash);
+
+
+--
+-- Name: index_embeddings_content_uniqueness; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_embeddings_content_uniqueness ON public.embeddings USING btree (search_document_id, embedding_model_id, content_hash);
+
+
+--
+-- Name: index_embeddings_on_embedding_model_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_embeddings_on_embedding_model_id ON public.embeddings USING btree (embedding_model_id);
+
+
+--
+-- Name: index_embeddings_on_search_document_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_embeddings_on_search_document_id ON public.embeddings USING btree (search_document_id);
+
+
+--
+-- Name: index_embeddings_one_active_per_document_model; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_embeddings_one_active_per_document_model ON public.embeddings USING btree (search_document_id, embedding_model_id) WHERE (status = 'active'::text);
+
+
+--
 -- Name: index_external_identities_on_encryption_context; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -2888,6 +3098,27 @@ CREATE UNIQUE INDEX index_requirements_on_public_id ON public.requirements USING
 --
 
 CREATE INDEX index_requirements_on_supersedes_requirement_id ON public.requirements USING btree (supersedes_requirement_id);
+
+
+--
+-- Name: index_search_documents_active_search_vector; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_search_documents_active_search_vector ON public.search_documents USING gin (search_vector) WHERE (status = 'active'::text);
+
+
+--
+-- Name: index_search_documents_on_product_variant_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX index_search_documents_on_product_variant_id ON public.search_documents USING btree (product_variant_id);
+
+
+--
+-- Name: index_search_documents_subject_kind_locale_version; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX index_search_documents_subject_kind_locale_version ON public.search_documents USING btree (product_id, product_variant_id, document_kind, locale, source_version);
 
 
 --
@@ -3477,6 +3708,14 @@ ALTER TABLE ONLY public.product_facts
 
 
 --
+-- Name: search_documents fk_rails_79ae37d1f3; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.search_documents
+    ADD CONSTRAINT fk_rails_79ae37d1f3 FOREIGN KEY (product_variant_id) REFERENCES public.product_variants(id) ON DELETE CASCADE;
+
+
+--
 -- Name: recommendation_evidence fk_rails_79df78614f; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3597,6 +3836,14 @@ ALTER TABLE ONLY public.recommendation_candidates
 
 
 --
+-- Name: embeddings fk_rails_a87a0137b4; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeddings
+    ADD CONSTRAINT fk_rails_a87a0137b4 FOREIGN KEY (search_document_id) REFERENCES public.search_documents(id) ON DELETE CASCADE;
+
+
+--
 -- Name: supplier_observations fk_rails_af15bf8fed; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3629,6 +3876,14 @@ ALTER TABLE ONLY public.sync_runs
 
 
 --
+-- Name: search_documents fk_rails_bb18fac0bb; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.search_documents
+    ADD CONSTRAINT fk_rails_bb18fac0bb FOREIGN KEY (product_id) REFERENCES public.products(id) ON DELETE CASCADE;
+
+
+--
 -- Name: recommendation_evidence fk_rails_c19f83666f; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3650,6 +3905,14 @@ ALTER TABLE ONLY public.products
 
 ALTER TABLE ONLY public.requirements
     ADD CONSTRAINT fk_rails_ccce84f25c FOREIGN KEY (originating_message_id) REFERENCES public.shopping_messages(id) ON DELETE SET NULL;
+
+
+--
+-- Name: embeddings fk_rails_cd9e26c5f4; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.embeddings
+    ADD CONSTRAINT fk_rails_cd9e26c5f4 FOREIGN KEY (embedding_model_id) REFERENCES public.embedding_models(id) ON DELETE RESTRICT;
 
 
 --
@@ -3772,6 +4035,7 @@ SET search_path TO "$user", public;
 
 INSERT INTO "schema_migrations" (version) VALUES
 ('20260920000006'),
+('20260920000005'),
 ('20260920000004'),
 ('20260920000003'),
 ('20260920000002'),

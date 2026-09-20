@@ -207,7 +207,22 @@ class DatabaseShoppingDecisionsTest < ActiveSupport::TestCase
     assert insert_evidence(candidate_id: candidate_id, inventory_observation_id: inventory_id)
     assert insert_evidence(candidate_id: candidate_id, supplier_observation_id: observation_id)
 
-    assert_constraint(foreign_key: true) { execute("DELETE FROM price_observations WHERE id = #{price_id}") }
+    # product_facts is the only evidence subject whose base table permits a DELETE at all: price
+    # observations, inventory observations, and supplier observations are each made unconditionally
+    # immutable by DB-04 triggers (already-merged, not owned by this migration), so a DELETE there
+    # always raises that trigger's check violation before any foreign key is ever evaluated. Prove
+    # RESTRICT against product_facts directly, and prove the other three evidence foreign keys are
+    # declared RESTRICT by reading their delete rule from the catalog instead.
+    assert_constraint(foreign_key: true) { execute("DELETE FROM product_facts WHERE id = #{fact_id}") }
+    %w[price_observations inventory_observations supplier_observations].each do |table|
+      assert_equal "r", select_value(<<~SQL.squish), table
+        SELECT confdeltype FROM pg_constraint
+        WHERE conrelid = 'recommendation_evidence'::regclass
+          AND confrelid = '#{table}'::regclass
+          AND contype = 'f'
+      SQL
+    end
+
     execute("DELETE FROM recommendation_candidates WHERE id = #{candidate_id}")
     assert_equal 0, select_value("SELECT count(*) FROM recommendation_evidence").to_i
   end
@@ -256,8 +271,19 @@ class DatabaseShoppingDecisionsTest < ActiveSupport::TestCase
     provider_session_b = insert_provider_session(grant_id: grant_b, session_id: session_b)
 
     assert insert_agent_run(session_id: session_a, grant_id: grant_a, provider_session_id: provider_session_a)
-    assert_constraint(foreign_key: true) { insert_agent_run(session_id: session_a, grant_id: grant_b) }
-    assert_constraint(foreign_key: true) { insert_agent_run(session_id: session_a, grant_id: grant_a, provider_session_id: provider_session_b) }
+
+    # Each mismatch below targets a session with no active agent run yet, so the foreign-key
+    # violation is not shadowed by the one-active-turn-per-session unique index (that index fires
+    # before an AFTER-ROW foreign-key check on INSERT; its own race coverage is the next test).
+    grant_mismatch_session = insert_session
+    assert_constraint(foreign_key: true) { insert_agent_run(session_id: grant_mismatch_session, grant_id: grant_b) }
+
+    provider_mismatch_session = insert_session
+    provider_mismatch_grant = insert_grant(session_id: provider_mismatch_session)
+    assert_constraint(foreign_key: true) do
+      insert_agent_run(session_id: provider_mismatch_session, grant_id: provider_mismatch_grant, provider_session_id: provider_session_b)
+    end
+
     assert_constraint(foreign_key: true) { insert_agent_run(session_id: session_b, grant_id: grant_a) }
   end
 
@@ -271,7 +297,11 @@ class DatabaseShoppingDecisionsTest < ActiveSupport::TestCase
     assert insert_tool_call(run_id: run_id, sequence: 2, idempotency_key: nil)
     assert insert_tool_call(run_id: run_id, sequence: 3, idempotency_key: nil)
 
-    other_run_id = insert_agent_run(session_id: session_id)
+    # A terminal status keeps this second run outside the one-active-turn-per-session
+    # partial unique index (that constraint is verified on its own in the "genuine race"
+    # test above), so this insert only needs to prove that idempotency-key scoping is
+    # per agent_run rather than global.
+    other_run_id = insert_agent_run(session_id: session_id, status: "succeeded")
     assert insert_tool_call(run_id: other_run_id, sequence: 1, idempotency_key: "search-1")
 
     results = concurrent_inserts([
