@@ -13,7 +13,7 @@ module Agents
       MAX_LIMIT = Catalog::ProductReader::MAX_LIMIT
       MAX_QUERY_BYTES = Search::LexicalRetrieval::MAX_QUERY_BYTES
 
-      def initialize(product_reader: Catalog::FixtureProductReader.new, retrieval: Search::LexicalRetrieval.new)
+      def initialize(product_reader: Catalog::ReaderSelection.call, retrieval: Search::LexicalRetrieval.new)
         @product_reader = product_reader
         @retrieval = retrieval
         @resolver = CandidateResolver.new(product_reader: product_reader)
