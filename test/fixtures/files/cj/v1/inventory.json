@@ -1,12 +1,115 @@
 {
-  "fixture_version": 1,
+  "fixture_version": 2,
   "observed_at": "2026-09-20T00:00:00Z",
-  "request": { "variant_id": "00005678" },
-  "response": {
-    "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-1",
-    "data": [
-      { "vid": "00005678", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 9, "cjInventoryNum": 4, "factoryInventoryNum": 5, "stock": [{ "stockId": "{fixture-stock-1}", "inventory": 4, "factoryInventory": 5 }] },
-      { "vid": "00005678", "areaId": "02", "countryCode": "US", "totalInventoryNum": 0, "cjInventoryNum": 0, "factoryInventoryNum": null, "stock": null }
-    ]
-  }
+  "entries": [
+    {
+      "request": { "variant_id": "00005678" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-1",
+        "data": [
+          { "vid": "00005678", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 9, "cjInventoryNum": 4, "factoryInventoryNum": 5, "stock": [{ "stockId": "{fixture-stock-1}", "inventory": 4, "factoryInventory": 5 }] },
+          { "vid": "00005678", "areaId": "02", "countryCode": "US", "totalInventoryNum": 0, "cjInventoryNum": 0, "factoryInventoryNum": null, "stock": null }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00021011" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-2",
+        "data": [
+          { "vid": "00021011", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 12, "cjInventoryNum": 8, "factoryInventoryNum": 4, "stock": [{ "stockId": "{fixture-stock-2}", "inventory": 8, "factoryInventory": 4 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00021012" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-3",
+        "data": [
+          { "vid": "00021012", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 0, "cjInventoryNum": 0, "factoryInventoryNum": 0, "stock": null }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00022021" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-4",
+        "data": [
+          { "vid": "00022021", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 25, "cjInventoryNum": 20, "factoryInventoryNum": 5, "stock": [{ "stockId": "{fixture-stock-3}", "inventory": 20, "factoryInventory": 5 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00023031" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-5",
+        "data": [
+          { "vid": "00023031", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 14, "cjInventoryNum": 10, "factoryInventoryNum": 4, "stock": [{ "stockId": "{fixture-stock-4}", "inventory": 10, "factoryInventory": 4 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00023032" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-6",
+        "data": [
+          { "vid": "00023032", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 9, "cjInventoryNum": 6, "factoryInventoryNum": 3, "stock": [{ "stockId": "{fixture-stock-5}", "inventory": 6, "factoryInventory": 3 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00024041" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-7",
+        "data": [
+          { "vid": "00024041", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 18, "cjInventoryNum": 12, "factoryInventoryNum": 6, "stock": [{ "stockId": "{fixture-stock-6}", "inventory": 12, "factoryInventory": 6 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00024042" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-8",
+        "data": [
+          { "vid": "00024042", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 11, "cjInventoryNum": 7, "factoryInventoryNum": 4, "stock": [{ "stockId": "{fixture-stock-7}", "inventory": 7, "factoryInventory": 4 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00025051" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-9",
+        "data": [
+          { "vid": "00025051", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 30, "cjInventoryNum": 22, "factoryInventoryNum": 8, "stock": [{ "stockId": "{fixture-stock-8}", "inventory": 22, "factoryInventory": 8 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00026061" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-10",
+        "data": [
+          { "vid": "00026061", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 16, "cjInventoryNum": 10, "factoryInventoryNum": 6, "stock": [{ "stockId": "{fixture-stock-9}", "inventory": 10, "factoryInventory": 6 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00026062" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-11",
+        "data": [
+          { "vid": "00026062", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 5, "cjInventoryNum": 3, "factoryInventoryNum": 2, "stock": [{ "stockId": "{fixture-stock-10}", "inventory": 3, "factoryInventory": 2 }] }
+        ]
+      }
+    },
+    {
+      "request": { "variant_id": "00027071" },
+      "response": {
+        "code": 200, "result": true, "message": "Synthetic success", "requestId": "fixture-inventory-12",
+        "data": [
+          { "vid": "00027071", "areaId": "01", "countryCode": "CN", "totalInventoryNum": 40, "cjInventoryNum": 30, "factoryInventoryNum": 10, "stock": [{ "stockId": "{fixture-stock-11}", "inventory": 30, "factoryInventory": 10 }] }
+        ]
+      }
+    }
+  ]
 }
