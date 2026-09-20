@@ -5,7 +5,7 @@ require "securerandom"
 require "socket"
 
 class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
-  MIGRATION_VERSION = "20260920000001"
+  MIGRATION_VERSIONS = Rails.root.glob("db/migrate/*.rb").map { |path| path.basename.to_s.split("_").first }.freeze
 
   test "schema load rejects an existing wrong pgvector version before stamping the migration" do
     with_database do |database, connection|
@@ -109,7 +109,9 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
 
   def stamp_migration(connection)
     connection.exec("CREATE TABLE schema_migrations (version character varying PRIMARY KEY)")
-    connection.exec_params("INSERT INTO schema_migrations (version) VALUES ($1)", [ MIGRATION_VERSION ])
+    MIGRATION_VERSIONS.each do |version|
+      connection.exec_params("INSERT INTO schema_migrations (version) VALUES ($1)", [ version ])
+    end
   end
 
   def run_rails(database, *arguments)
