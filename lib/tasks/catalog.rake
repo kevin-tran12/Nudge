@@ -17,12 +17,11 @@
 #
 # Nothing here prints, logs, or interpolates a credential: only
 # `credentials_present=true/false` is ever reported.
+#
+# Rails loads lib/tasks/**/*.rake more than once (the engine and the
+# application each load the glob), so this file deliberately defines no
+# top-level constants -- the defaults live in methods instead.
 module CatalogSync
-  MODES = %w[fixture record].freeze
-  DEFAULTS = { mode: "fixture", product_limit: "20", page_size: "20", max_variants: "5",
-    category: "", keyword: "", dry_run: "false" }.freeze
-  SUPPLIER_KEY = "cj".freeze
-
   class << self
     def run(out: $stdout)
       mode = resolved_mode
@@ -43,8 +42,8 @@ module CatalogSync
       category, keyword = filters
       out.puts(header(mode:, limit:, page_size:, max_variants:, dry_run:, category:, keyword:))
 
-      supplier = Supplier.find_by(key: SUPPLIER_KEY)
-      abort("catalog:sync: supplier #{SUPPLIER_KEY.inspect} is not provisioned.") unless supplier
+      supplier = Supplier.find_by(key: "cj")
+      abort("catalog:sync: supplier \"cj\" is not provisioned.") unless supplier
 
       summary = capture(supplier:, limit:, page_size:, max_variants:, category:, keyword:, dry_run:)
       indexed = dry_run ? 0 : reindex
@@ -69,7 +68,7 @@ module CatalogSync
       # Anything else either stays on the fixture default or aborts.
       def resolved_mode
         mode = env("CATALOG_SYNC_MODE")
-        abort("catalog:sync: CATALOG_SYNC_MODE must be one of #{MODES.join(', ')}.") unless MODES.include?(mode)
+        abort("catalog:sync: CATALOG_SYNC_MODE must be one of #{modes.join(', ')}.") unless modes.include?(mode)
         return mode if mode == "fixture"
 
         config = Rails.application.config.x.cj
@@ -102,8 +101,17 @@ module CatalogSync
         config.respond_to?(:credentials_present?) && config.credentials_present?
       end
 
+      def modes
+        %w[fixture record].freeze
+      end
+
+      def defaults
+        { mode: "fixture", product_limit: "20", page_size: "20", max_variants: "5",
+          category: "", keyword: "", dry_run: "false" }.freeze
+      end
+
       def env(key)
-        ENV.fetch(key, DEFAULTS.fetch(key.delete_prefix("CATALOG_SYNC_").downcase.to_sym))
+        ENV.fetch(key, defaults.fetch(key.delete_prefix("CATALOG_SYNC_").downcase.to_sym))
       end
 
       def integer_env(key, minimum, maximum)
