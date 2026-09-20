@@ -2,7 +2,7 @@ class Requirement < ApplicationRecord
   KINDS = %w[hard soft].freeze
   SOURCES = %w[user_explicit user_inferred system_derived history_soft].freeze
   STATUSES = %w[active rejected superseded].freeze
-  REQUIREMENT_KEY_PATTERN = /\A[a-z][a-z0-9_]{0,63}\z/
+  REQUIREMENT_KEY_PATTERN = /\A[a-z][a-z0-9_-]{0,63}\z/
   OPERATOR_PATTERN = /\A[a-z][a-z0-9_]{0,31}\z/
 
   attribute :value_json, CatalogJsonType.new
