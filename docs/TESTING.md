@@ -41,6 +41,8 @@ CI uses one Rails test worker for repeatable coverage and failure output. A deve
 
 `bin/test-browser` runs the current application-shell journey through the pinned remote Chromium service in `compose.system-test.yaml`. The lane covers 320, 375, 768, and 1280 CSS-pixel viewports, semantic landmarks, horizontal overflow, keyboard skip-link behavior, visible focus, and minimum target geometry. Run it with the deterministic command and artifact-export procedure in [`system-tests.md`](system-tests.md). Broader staging journeys remain a later release gate as product workflows are implemented.
 
+CI runs this browser lane as a required job in its own Compose project. It verifies the UID/read-only-source contract for both Rails services before running the browser tests, preserves command failures through `pipefail`, and exports coverage, screenshots, and the browser log before tearing down the isolated services.
+
 ## CI evidence and failure behavior
 
 GitHub Actions runs the fast lane, integration/contract lane, and full coverage gate before uploading the compressed coverage report and plain test logs for 14 days. The shell uses `pipefail`, so logging cannot hide a failing test. Quality and production-security jobs independently gate lint, Ruby dependency audit, Brakeman, repository secret/misconfiguration scanning, the complete production-image contract, and operating-system container vulnerabilities. No JavaScript import map is installed yet; add an executable JavaScript dependency audit when client-side packages are introduced.

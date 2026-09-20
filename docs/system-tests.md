@@ -20,3 +20,5 @@ The Selenium image is pinned to the multi-platform manifest for the official `se
 Failed tests save screenshots in the runner's writable temporary-data volume. The exporter places screenshots and SimpleCov output under `tmp/system-test-artifacts`. The lane owns only read-only shell journeys. Future stateful journeys must create uniquely namespaced test records and clean them up.
 
 `system_tests` runs the shared `bin/test-browser` lane entry point with `RUN_BROWSER_TESTS=1`, so browser registration and fixture-only safeguards stay aligned with the other test lanes.
+
+The CI browser job uses a unique Compose project for each workflow run. It treats the two container-runtime probes and `bin/test-browser` as required gates, then exports and uploads coverage, failure screenshots, and the browser log under `if: always()` before removing the isolated volumes.
