@@ -1,31 +1,57 @@
 module Agents
   module Tools
-    # Honest bounded filter over Catalog::ProductReader#list. There is no search/ranking/
-    # eligibility engine yet (WP-09), so this never fabricates a relevance score: it is a
-    # plain substring match over title/description within a single bounded catalog page.
+    # Lexical retrieval over Search::LexicalRetrieval's tsvector index, resolved back to
+    # real catalog facts via CandidateResolver and projected through the allow-listed
+    # ProductProjection. There is still no ranking/eligibility model here (that is
+    # recommend_products): results are the index's own deterministic order.
+    #
+    # If no product has been indexed yet (search_documents is empty), this falls back to
+    # a plain bounded substring match over Catalog::ProductReader#list so the tool never
+    # hard-fails just because CatalogIndexer has not run.
     class SearchProducts
       DEFAULT_LIMIT = 10
       MAX_LIMIT = Catalog::ProductReader::MAX_LIMIT
-      MAX_QUERY_BYTES = 200
+      MAX_QUERY_BYTES = Search::LexicalRetrieval::MAX_QUERY_BYTES
 
-      def initialize(product_reader: Catalog::FixtureProductReader.new)
+      def initialize(product_reader: Catalog::FixtureProductReader.new, retrieval: Search::LexicalRetrieval.new)
         @product_reader = product_reader
+        @retrieval = retrieval
+        @resolver = CandidateResolver.new(product_reader: product_reader)
       end
 
       def call(shopping_session:, arguments:)
         raise ArgumentError, "invalid shopping_session" unless shopping_session.is_a?(ShoppingSession)
 
         query, limit = validate!(arguments)
-        page = @product_reader.list(limit: MAX_LIMIT)
-        matches = page.items.select { |product| matches?(product, query) }.first(limit)
+        products = SearchDocument.where(status: "active").exists? ? indexed_products(query, limit) : fallback_products(query, limit)
 
-        { "query" => query, "count" => matches.length,
-          "results" => matches.map { |product| ProductProjection.summary(product) } }
-      rescue Catalog::ProductReader::Error
+        { "query" => query, "count" => products.length,
+          "results" => products.map { |product| ProductProjection.summary(product) } }
+      rescue Catalog::ProductReader::Error, Search::LexicalRetrieval::Error
         raise Error.new(:unavailable)
       end
 
       private
+        def indexed_products(query, limit)
+          result = @retrieval.call(query: query, limit: limit)
+          @resolver.resolve(result.items).map(&:catalog_product)
+        end
+
+        # Honest bounded filter over a single catalog page, used only while the lexical
+        # index has nothing in it yet. Product text is untrusted supplier data: it is
+        # compared as an opaque byte sequence only, never interpreted or treated as
+        # instruction.
+        def fallback_products(query, limit)
+          page = @product_reader.list(limit: MAX_LIMIT)
+          page.items.select { |product| matches?(product, query) }.first(limit)
+        end
+
+        def matches?(product, query)
+          needle = query.downcase
+          product.title.downcase.include?(needle) ||
+            (product.description && product.description.downcase.include?(needle))
+        end
+
         def validate!(arguments)
           raise Error.new(:invalid_arguments) unless arguments.is_a?(Hash)
 
@@ -42,14 +68,6 @@ module Agents
           raise Error.new(:invalid_arguments) unless limit.is_a?(Integer) && limit.between?(1, MAX_LIMIT)
 
           [ query, limit ]
-        end
-
-        # Product text is untrusted supplier data: it is compared as an opaque byte
-        # sequence only, never interpreted, evaluated, or treated as instruction.
-        def matches?(product, query)
-          needle = query.downcase
-          product.title.downcase.include?(needle) ||
-            (product.description && product.description.downcase.include?(needle))
         end
     end
   end
