@@ -35,7 +35,8 @@ module Voice
     TOOLS = {
       "search_products" => Agents::Tools::SearchProducts,
       "get_product_details" => Agents::Tools::GetProductDetails,
-      "get_current_shopping_state" => Agents::Tools::GetCurrentShoppingState
+      "get_current_shopping_state" => Agents::Tools::GetCurrentShoppingState,
+      "add_to_cart" => Agents::Tools::AddToCart
     }.freeze
 
     rescue_from ActionController::InvalidAuthenticityToken, with: :render_invalid_csrf

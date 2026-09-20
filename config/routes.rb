@@ -10,6 +10,9 @@ Rails.application.routes.draw do
 
   resources :products, only: %i[index show]
 
+  resource :cart, only: :show
+  resources :cart_items, only: %i[create update destroy]
+
   namespace :voice do
     resource :session, only: :create, controller: "sessions"
     post "tools/:tool_name" => "tools#call", as: :tool
