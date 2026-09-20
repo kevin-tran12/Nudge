@@ -7,6 +7,7 @@ require "socket"
 class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
   MIGRATION_VERSIONS = Rails.root.glob("db/migrate/*.rb").map { |path| path.basename.to_s.split("_").first }.freeze
   IDENTITY_MIGRATION_VERSION = "20260920000002"
+  CATALOG_MIGRATION_VERSION = "20260920000003"
   IDENTITY_TABLES = %w[
     agent_provider_sessions
     ai_access_grants
@@ -16,6 +17,76 @@ class DatabaseCompatibilityEntrypointsTest < ActiveSupport::TestCase
     external_identities
     users
   ].freeze
+  CATALOG_TABLES = %w[
+    supplier_warehouses
+    supplier_variants
+    supplier_products
+    product_variants
+    product_categories
+    products
+    categories
+    suppliers
+  ].freeze
+
+  test "catalog migration rolls back completely and preserves its constraints through redo and schema load" do
+    with_database do |database, connection|
+      Tempfile.create([ "db03-rollback", ".sql" ]) do |structure|
+        assert_command_succeeds run_rails(database, "db:migrate", schema: structure.path)
+
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:down",
+          "VERSION=#{CATALOG_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        CATALOG_TABLES.each do |table|
+          assert_nil connection.exec_params("SELECT to_regclass($1)", [ "public.#{table}" ]).getvalue(0, 0), table
+        end
+        assert_equal "0", connection.exec_params(<<~SQL).getvalue(0, 0)
+          SELECT count(*)
+          FROM pg_constraint
+          WHERE conname = 'fk_products_primary_category_membership'
+             OR conname = 'fk_supplier_variants_product_supplier'
+        SQL
+
+        assert_command_succeeds run_rails(
+          database,
+          "db:migrate:redo",
+          "VERSION=#{CATALOG_MIGRATION_VERSION}",
+          schema: structure.path
+        )
+        CATALOG_TABLES.each do |table|
+          assert_equal table, connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+        end
+        deferred = connection.exec(<<~SQL).first
+          SELECT condeferrable, condeferred
+          FROM pg_constraint
+          WHERE conname = 'fk_products_primary_category_membership'
+        SQL
+        assert_equal({ "condeferrable" => "t", "condeferred" => "t" }, deferred)
+
+        assert_command_succeeds run_rails(database, "db:schema:dump", schema: structure.path)
+        dumped = File.read(structure.path)
+        assert_includes dumped, Nudge::DatabaseCompatibility::PGVECTOR_STRUCTURE_STATEMENT
+        assert_includes dumped, "fk_products_primary_category_membership"
+
+        with_database do |load_database, load_connection|
+          assert_command_succeeds run_rails(load_database, "db:schema:load", schema: structure.path)
+          CATALOG_TABLES.each do |table|
+            assert_equal table, load_connection.exec_params("SELECT to_regclass($1)::text", [ "public.#{table}" ]).getvalue(0, 0)
+          end
+          assert_equal "0.8.5", load_connection.exec(<<~SQL).getvalue(0, 0)
+            SELECT extversion FROM pg_extension WHERE extname = 'vector'
+          SQL
+          assert_equal "true", load_connection.exec(<<~SQL).getvalue(0, 0)
+            SELECT condeferrable::text
+            FROM pg_constraint
+            WHERE conname = 'fk_products_primary_category_membership'
+          SQL
+        end
+      end
+    end
+  end
 
   test "identity migration rolls back completely and recreates its canonical schema on redo" do
     with_database do |database, connection|
