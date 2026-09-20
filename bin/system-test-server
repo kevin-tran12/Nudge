@@ -1,0 +1,8 @@
+#!/usr/bin/env ruby
+
+test_environment = { "RAILS_ENV" => "test", "PROVIDER_MODE" => "fixture" }
+
+abort "Test database preparation failed" unless system(test_environment, "bin/rails", "db:prepare")
+abort "Test asset build failed" unless system(test_environment, "bin/rails", "tailwindcss:build")
+
+exec(test_environment, "bin/rails", "server", "--binding", "0.0.0.0", "--port", "3000")

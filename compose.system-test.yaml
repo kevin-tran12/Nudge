@@ -1,0 +1,70 @@
+services:
+  system_app:
+    build:
+      context: .
+      target: development
+    init: true
+    command: ["bin/system-test-server"]
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-nudge}
+      DB_PASSWORD: ${DB_PASSWORD:-nudge_local_only}
+      RAILS_ENV: test
+      RAILS_MAX_THREADS: 5
+      PROVIDER_MODE: fixture
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "ruby", "-rnet/http", "-e", "exit(Net::HTTP.get_response(URI('http://127.0.0.1:3000/health/ready')).is_a?(Net::HTTPSuccess) ? 0 : 1)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 15s
+    volumes:
+      - .:/rails
+
+  browser:
+    image: ghcr.io/seleniumhq/standalone-chromium:151.0.7922.108-chromedriver-151.0.7922.108-grid-4.47.0-20260808@sha256:1d3d834a2ce93f26cc0d0ae3c61abd189755b32649f5c356c6c5cf9502aa397e
+    environment:
+      SE_NODE_MAX_SESSIONS: 1
+      SE_SESSION_REQUEST_TIMEOUT: 30
+      SE_SESSION_RETRY_INTERVAL: 1
+      SE_START_VNC: "false"
+    healthcheck:
+      test: ["CMD", "/opt/bin/check-grid.sh", "--host", "127.0.0.1", "--port", "4444"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 15s
+    shm_size: 1gb
+    mem_limit: 2g
+    cpus: 2
+
+  system_tests:
+    build:
+      context: .
+      target: development
+    init: true
+    command: ["bin/rails", "test:system"]
+    environment:
+      CAPYBARA_APP_HOST: http://system_app:3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-nudge}
+      DB_PASSWORD: ${DB_PASSWORD:-nudge_local_only}
+      PARALLEL_WORKERS: 1
+      PROVIDER_MODE: fixture
+      RAILS_ENV: test
+      RAILS_SYSTEM_TESTING_SCREENSHOT: failed
+      SELENIUM_URL: http://browser:4444/wd/hub
+    depends_on:
+      browser:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      system_app:
+        condition: service_healthy
+    volumes:
+      - .:/rails
