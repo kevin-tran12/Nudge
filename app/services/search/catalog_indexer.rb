@@ -14,7 +14,16 @@ module Search
     DOCUMENT_KIND = "listing"
     LOCALE = "en"
 
-    Result = Data.define(:processed, :created, :superseded, :unchanged, :skipped)
+    # CAT-DB-READER-01 fix #5: catalog:sync's summary used to print `processed`
+    # (products attempted) as if it meant "now searchable", so a deployment where
+    # every product came back :skipped (the exact defect this fix addresses) still
+    # reported success. `indexed` is the subset that is actually active with new
+    # content after this run -- a :skipped or :unchanged row contributed nothing new.
+    Result = Data.define(:processed, :created, :superseded, :unchanged, :skipped) do
+      def indexed
+        created + superseded
+      end
+    end
 
     class Error < StandardError
       attr_reader :code
@@ -55,8 +64,8 @@ module Search
 
     private
       def index_product(product)
-        supplier_product = SupplierProduct.order(:supplier_id).find_by(external_product_id: product.id)
-        return :skipped if supplier_product.nil?
+        local_product_id = resolve_local_product_id(product)
+        return :skipped if local_product_id.nil?
 
         normalized_text = normalize_text(product)
         return :skipped if normalized_text.empty?
@@ -65,7 +74,7 @@ module Search
 
         ApplicationRecord.transaction do
           existing = SearchDocument.lock.find_by(
-            product_id: supplier_product.product_id, product_variant_id: nil,
+            product_id: local_product_id, product_variant_id: nil,
             document_kind: DOCUMENT_KIND, locale: LOCALE, status: "active"
           )
 
@@ -73,7 +82,7 @@ module Search
 
           existing&.update!(status: "superseded")
           SearchDocument.create!(
-            product_id: supplier_product.product_id, product_variant_id: nil,
+            product_id: local_product_id, product_variant_id: nil,
             document_kind: DOCUMENT_KIND, locale: LOCALE,
             normalized_text: normalized_text, content_hash: content_hash,
             source_version: "content:#{content_hash.unpack1('H*')}",
@@ -81,6 +90,29 @@ module Search
           )
           existing ? :superseded : :created
         end
+      end
+
+      # CAT-DB-READER-01: SupplierProduct#external_product_id is the right lookup
+      # only for :supplier_external readers (product.id is CJ's own id there). Under
+      # :local_public_id (Catalog::DatabaseProductReader) product.id already IS
+      # Product#public_id -- the reader read that row to build the DTO -- so no
+      # SupplierProduct hop is needed to know the product exists; going through it
+      # anyway is exactly why every real product came back :skipped despite a
+      # successful catalog:sync.
+      def resolve_local_product_id(product)
+        if local_public_id_scheme?
+          ::Product.find_by(public_id: product.id)&.id
+        else
+          SupplierProduct.order(:supplier_id).find_by(external_product_id: product.id)&.product_id
+        end
+      end
+
+      # Own-class check only (not inherited): a reader that never declares ID_SCHEME
+      # (e.g. a bare test double) is treated as :supplier_external, matching this
+      # indexer's behavior before CAT-DB-READER-01 rather than raising on it.
+      def local_public_id_scheme?
+        klass = @product_reader.class
+        klass.const_defined?(:ID_SCHEME, false) && klass::ID_SCHEME == :local_public_id
       end
 
       # Only the reader's already-sanitized title/description fields are used, and they

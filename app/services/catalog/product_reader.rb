@@ -2,6 +2,17 @@ module Catalog
   class ProductReader
     MAX_LIMIT = 24
 
+    # What kind of id a reader's Product/Variant DTOs carry -- CAT-DB-READER-01.
+    # Consumers that turn a DTO id back into a local row (Cart::CatalogVariantResolver,
+    # Search::CatalogIndexer, Agents::Tools::CandidateResolver) must branch on this
+    # instead of assuming every reader means "supplier external id": that wrong
+    # assumption is exactly what made add-to-cart duplicate rows, the search index
+    # stay empty, and recommend_products silently drop every real product once
+    # Catalog::DatabaseProductReader (ids = local public_id) went live alongside
+    # Catalog::FixtureProductReader (ids = supplier external id). Every concrete
+    # reader must override this; nil here only marks the base as abstract.
+    ID_SCHEME = nil
+
     Page = Data.define(:items, :next_cursor)
     Product = Data.define(:id, :sku, :title, :description, :images, :images_state, :variants, :freshness)
     Image = Data.define(:url, :position)

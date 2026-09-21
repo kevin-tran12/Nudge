@@ -59,8 +59,12 @@ module CatalogSync
           max_variants_per_product: max_variants, dry_run: dry_run)
       end
 
+      # CAT-DB-READER-01 fix #5: `indexed` (created + superseded), not `processed`
+      # (attempted), is what tells an operator the sync actually landed in the
+      # search index -- see Search::CatalogIndexer::Result. Printing `processed`
+      # meant a run where every product came back :skipped still read as success.
       def reindex
-        Search::CatalogIndexer.new(product_reader: Catalog::DatabaseProductReader.new).call.processed
+        Search::CatalogIndexer.new(product_reader: Catalog::DatabaseProductReader.new).call.indexed
       end
 
       # Record is selected only when the operator asked for it AND the
