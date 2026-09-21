@@ -1,14 +1,20 @@
 module Integrations
   module Cj
     module Contracts
-      Result = Data.define(:value, :provenance, :request)
-      Provenance = Data.define(:provider, :source, :endpoint_key, :adapter_version,
-        :payload_version, :payload_sha256, :observed_at, :request_id)
-      Money = Data.define(:amount_minor, :currency)
-      Measurement = Data.define(:value, :unit)
-      Product = Data.define(:external_id, :sku, :title, :description, :image_urls, :variants)
-      Variant = Data.define(:external_id, :product_id, :sku, :title, :option_label, :price, :weight,
-        :length, :width, :height)
+      # CAT-SYNC-01 (Prodigi phase). These six shapes are not CJ-specific --
+      # ArtifactImporter only ever reads the generic shape, never a CJ-only
+      # field -- so they alias Integrations::Contracts instead of forking it.
+      # Integrations::Cj::Contracts::Product and Integrations::Contracts::Product
+      # are the exact same class, not merely equal instances.
+      Result = Integrations::Contracts::Result
+      Provenance = Integrations::Contracts::Provenance
+      Money = Integrations::Contracts::Money
+      Measurement = Integrations::Contracts::Measurement
+      Product = Integrations::Contracts::Product
+      Variant = Integrations::Contracts::Variant
+
+      # CJ-only shapes: nothing about them is shared with another supplier,
+      # so they stay defined only in this namespace.
       Inventory = Data.define(:variant_id, :warehouse_id, :country_code,
         :total_quantity, :cj_quantity, :factory_quantity, :subwarehouses)
       Subwarehouse = Data.define(:external_id, :cj_quantity, :factory_quantity)
@@ -18,15 +24,7 @@ module Integrations
       ProductListPage = Data.define(:products, :page, :page_size, :total_count, :has_more)
 
       def self.deep_freeze(value)
-        case value
-        when Data
-          value.to_h.each_value { |child| deep_freeze(child) }
-        when Array
-          value.each { |child| deep_freeze(child) }
-        when Hash
-          value.each { |key, child| deep_freeze(key); deep_freeze(child) }
-        end
-        value.freeze
+        Integrations::Contracts.deep_freeze(value)
       end
     end
   end

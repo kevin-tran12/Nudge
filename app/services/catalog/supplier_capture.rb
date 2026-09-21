@@ -34,7 +34,6 @@ module Catalog
     MAX_PAGE_SIZE = 50
     DEFAULT_PAGE_SIZE = 20
     DEFAULT_MAX_VARIANTS_PER_PRODUCT = 25
-    POINTS = Integrations::Cj::Adapter::POINTS
 
     # One bad product must not destroy an otherwise good import, but a run in
     # which almost everything fails is a broken run: it should stop rather than
@@ -142,17 +141,19 @@ module Catalog
       new(supplier: supplier, adapter: yield(sink), sink: sink, **options)
     end
 
-    def initialize(supplier:, adapter:, sink:, importer: ArtifactImporter.new,
-      validator: Integrations::Cj::RecordArtifactValidator.new, clock: -> { Time.current })
+    def initialize(supplier:, adapter:, sink:, profile: Catalog::ImportProfiles::CJ,
+      importer: ArtifactImporter.new(profile:), validator: profile.validator_class.new,
+      clock: -> { Time.current })
       unless supplier.instance_of?(Supplier) && supplier.persisted? && sink.instance_of?(RawSink) &&
           adapter.respond_to?(:mode) && importer.instance_of?(ArtifactImporter) &&
-          validator.instance_of?(Integrations::Cj::RecordArtifactValidator) && clock.respond_to?(:call)
+          validator.instance_of?(profile.validator_class) && clock.respond_to?(:call)
         raise Error.new(:invalid_input)
       end
 
       @supplier = supplier
       @adapter = adapter
       @sink = sink
+      @profile = profile
       @importer = importer
       @validator = validator
       @clock = clock
@@ -179,7 +180,7 @@ module Catalog
         variants_captured: counts[:variants_captured], variants_imported: counts[:variants_imported],
         variants_skipped: counts[:variants_skipped], points_consumed: points_consumed,
         calls: @calls.freeze, dry_run:).freeze
-    rescue Integrations::Cj::Error => error
+    rescue @profile.error_class => error
       raise Error.new(error.code), cause: nil
     rescue ArtifactImporter::Error => error
       raise Error.new(error.code), cause: nil
@@ -221,7 +222,7 @@ module Catalog
         variant_ids.each { |variant_id| capture_inventory(variant_id, counts) } unless dry_run
         @consecutive_failures = 0
         nil
-      rescue Integrations::Cj::Error, ArtifactImporter::Error => error
+      rescue @profile.error_class, ArtifactImporter::Error => error
         raise Error.new(error.code), cause: nil if fatal?(error)
 
         # The adapter may have written a raw capture before the failure was
@@ -283,9 +284,13 @@ module Catalog
       # Exact for the calls this run issued, using the adapter's own per-call
       # estimates. It excludes the adapter's internal access-token fetches
       # (Adapter::AUTH_POINTS, normally one per run), which this class does not
-      # initiate and cannot observe.
+      # initiate and cannot observe. An adapter that defines no POINTS table
+      # (a future supplier with no point-budget concept) simply costs nothing.
       def points_consumed
-        @calls.sum { |operation, count| POINTS.fetch(operation) * count }
+        return 0 unless @adapter.class.const_defined?(:POINTS)
+
+        points = @adapter.class::POINTS
+        @calls.sum { |operation, count| points.fetch(operation) * count }
       end
 
       def validate!(max_products:, page_size:, category:, keyword:, max_variants_per_product:, dry_run:)

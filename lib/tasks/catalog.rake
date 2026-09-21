@@ -52,7 +52,7 @@ module CatalogSync
 
     private
       def capture(supplier:, limit:, page_size:, max_variants:, category:, keyword:, dry_run:)
-        Catalog::SupplierCapture.build(supplier: supplier) do |sink|
+        Catalog::SupplierCapture.build(supplier: supplier, profile: Catalog::ImportProfiles::CJ) do |sink|
           Integrations::Cj::Adapter.new(mode: :record, deployment: Rails.env,
             capability: Integrations::Cj::ModePolicy::RECORD_CAPABILITY, raw_sink: sink)
         end.call(max_products: limit, page_size: page_size, category: category, keyword: keyword,

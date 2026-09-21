@@ -202,6 +202,25 @@ class CatalogArtifactImporterTest < ActiveSupport::TestCase
     assert_equal 0, SyncRun.count
   end
 
+  # CAT-SYNC-01 (Prodigi phase). An importer is bound to one supplier profile
+  # (profile.supplier_key), independent of the hardcoded "cj" checks this
+  # phase removes: a profile built for a different supplier_key must still be
+  # refused, even though every other CJ literal on the profile (validator,
+  # error class, operations) is untouched.
+  test "rejects a supplier whose key does not match the importer's own profile" do
+    mismatched_profile = Catalog::ImportProfiles::CJ.with(supplier_key: "prodigi")
+    importer = Catalog::ArtifactImporter.new(profile: mismatched_profile)
+    before = durable_snapshot
+
+    error = assert_raises(Catalog::ArtifactImporter::Error) do
+      importer.call(supplier: @supplier, operation: :product,
+        artifact_bytes: fixture_bytes(:product), received_at: RECEIVED_AT)
+    end
+    assert_equal :supplier_mismatch, error.code
+    assert_equal before, durable_snapshot
+    assert_equal 0, SyncRun.count
+  end
+
   test "dry run predicts product and inventory counts without writes or sequence allocation" do
     before = durable_snapshot
     product_result = @importer.call(supplier: @supplier, operation: :product,
