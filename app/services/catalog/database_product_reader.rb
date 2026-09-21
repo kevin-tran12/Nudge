@@ -16,6 +16,11 @@ module Catalog
   # hosts. Rows that fail that validation raise source_unavailable, the same
   # failure code the fixture reader raises for malformed data.
   class DatabaseProductReader < ProductReader
+    # CAT-DB-READER-01: this reader's ids are the local Product/ProductVariant
+    # public_id (a UUID) -- it reads CAT-IMPORT-01's own imported rows, so there
+    # is no supplier external id to round-trip through.
+    ID_SCHEME = :local_public_id
+
     PRICE_KIND = "supplier_sell"
     ID_PATTERN = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
     CURSOR_PATTERN = /\A(?:0|[1-9]\d{0,5})\z/

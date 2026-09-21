@@ -2,6 +2,10 @@ require "uri"
 
 module Catalog
   class FixtureProductReader < ProductReader
+    # CAT-DB-READER-01: this reader's ids are the CJ supplier's own external
+    # product/variant ids, verbatim -- not a local public_id.
+    ID_SCHEME = :supplier_external
+
     DEFAULT_PRODUCT_IDS = [
       "00001234", "00002001", "00002002", "00002003",
       "00002004", "00002005", "00002006", "00002007"
