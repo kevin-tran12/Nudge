@@ -10,13 +10,10 @@ module Catalog
     # oss-cf.cjdropshipping.com, so an allowlist without it rejects every real
     # product. All three are first-party supplier CDN hosts; the rule itself is
     # unchanged (exact host match, HTTPS only, no userinfo, query or fragment).
-    APPROVED_MEDIA_HOSTS = %w[
-      cf.cjdropshipping.com
-      oss-cf.cjdropshipping.com
-      oss.cjdropshipping.com
-      cc-west-usa.oss-us-west-1.aliyuncs.com
-      cj-product-center.oss-accelerate.aliyuncs.com
-    ].freeze
+    # Delegates to Catalog::MediaHosts so this, ArtifactImporter's media-url
+    # validator, and Catalog::DatabaseProductReader all agree on one list
+    # (CAT-MEDIA-01).
+    APPROVED_MEDIA_HOSTS = MediaHosts.approved
     ID_PATTERN = /\A[A-Za-z0-9_{}-]+\z/
     CURSOR_PATTERN = /\A(?:0|[1-9]\d{0,5})\z/
 

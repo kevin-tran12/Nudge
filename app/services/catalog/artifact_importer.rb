@@ -53,9 +53,10 @@ module Catalog
       end
     end
 
-    def initialize(validator: Integrations::Cj::RecordArtifactValidator.new)
-      raise Error.new(:invalid_input) unless validator.instance_of?(Integrations::Cj::RecordArtifactValidator)
+    def initialize(profile: Catalog::ImportProfiles::CJ, validator: profile.validator_class.new)
+      raise Error.new(:invalid_input) unless validator.instance_of?(profile.validator_class)
 
+      @profile = profile
       @validator = validator
     end
 
@@ -116,18 +117,18 @@ module Catalog
           code = operation.instance_of?(Symbol) && !OPERATIONS.include?(operation) ? :invalid_operation : :invalid_input
           raise Error.new(code)
         end
-        raise Error.new(:supplier_mismatch) unless supplier.key == "cj"
+        raise Error.new(:supplier_mismatch) unless supplier.key == @profile.supplier_key
       end
 
       def read_artifact(operation:, artifact_bytes:)
         @validator.read(operation:, artifact_bytes:)
-      rescue Integrations::Cj::Error
+      rescue @profile.error_class
         raise Error.new(:invalid_artifact), cause: nil
       end
 
       def build_context(supplier:, operation:, validated:, received_at:, dry_run:)
         provenance = validated.provenance
-        raise Error.new(:supplier_mismatch) unless provenance.provider == :cj &&
+        raise Error.new(:supplier_mismatch) unless provenance.provider == @profile.provider &&
           provenance.adapter_version == supplier.adapter_version
 
         external_resource_id = case operation
@@ -153,7 +154,8 @@ module Catalog
 
       def validate_locked_supplier!(context)
         provenance = context.validated.provenance
-        unless context.supplier.key == "cj" && context.supplier.adapter_version == provenance.adapter_version
+        unless context.supplier.key == @profile.supplier_key &&
+            context.supplier.adapter_version == provenance.adapter_version
           raise Error.new(:supplier_mismatch)
         end
       end
@@ -280,7 +282,7 @@ module Catalog
         SQL
           where(supplier: context.supplier, resource_kind: "stock",
             external_resource_id: context.external_resource_id, normalization_status: "normalized",
-            endpoint_key: "product/stock/queryByVid", payload_schema_version: 1).
+            endpoint_key: @profile.stock_endpoint_key, payload_schema_version: 1).
           where(<<~SQL.squish).
             NOT EXISTS (
               SELECT 1 FROM sync_checkpoints other_checkpoints
@@ -328,7 +330,7 @@ module Catalog
 
         uri = URI.parse(url)
         unless uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && uri.query.nil? &&
-            uri.fragment.nil? && FixtureProductReader::APPROVED_MEDIA_HOSTS.include?(uri.host) &&
+            uri.fragment.nil? && MediaHosts.approved.include?(uri.host) &&
             uri.path.start_with?("/") && !uri.path.split("/").include?("..") && !uri.path.include?("%")
           raise Error.new(:unsafe_media_url)
         end
@@ -537,7 +539,7 @@ module Catalog
       end
 
       def variant_attributes(value, title)
-        { title:, canonical_sku: nil, option_summary: {}, option_schema_version: 1,
+        { title:, canonical_sku: nil, option_summary: value.options || {}, option_schema_version: 1,
           status: nil }.merge(supplier_measurement_attributes(value)).tap { |attributes| attributes.delete(:status) }
       end
 

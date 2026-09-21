@@ -193,7 +193,7 @@ module Catalog
         raise Error.new(:source_unavailable) unless safe_string_encoding?(value, min: 1, max: 2048)
         uri = URI.parse(value)
         unless uri.is_a?(URI::HTTPS) && uri.port == 443 && uri.userinfo.nil? && uri.query.nil? &&
-            uri.fragment.nil? && FixtureProductReader::APPROVED_MEDIA_HOSTS.include?(uri.host) &&
+            uri.fragment.nil? && MediaHosts.approved.include?(uri.host) &&
             uri.path.start_with?("/") && !uri.path.split("/").include?("..") && !uri.path.include?("%")
           raise Error.new(:source_unavailable)
         end
