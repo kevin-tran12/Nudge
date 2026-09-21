@@ -1,0 +1,5 @@
+{
+  "outcome": "Error",
+  "traceParent": "fixture-trace-throttled",
+  "error": { "code": "TooManyRequests", "message": "Synthetic throttling" }
+}

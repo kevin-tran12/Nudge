@@ -1,0 +1,46 @@
+{
+  "fixture_version": 1,
+  "observed_at": "2026-09-20T00:00:00Z",
+  "entries": [
+    {
+      "request": { "sku": "GLOBAL-CFPM-16X24" },
+      "response": {
+        "outcome": "Ok",
+        "traceParent": "fixture-trace-product-1",
+        "product": {
+          "sku": "GLOBAL-CFPM-16X24",
+          "description": "Framed canvas print",
+          "productDimensions": { "width": 16, "height": 24, "units": "in" },
+          "attributes": { "color": [ "black", "white" ], "wrap": [ "black", "mirror" ] },
+          "printAreas": [ "default" ],
+          "variants": [
+            {
+              "attributes": { "color": "black" },
+              "shipsFrom": [ "US", "GB" ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": { "sku": "GLOBAL-MUG-11OZ" },
+      "response": {
+        "outcome": "Ok",
+        "traceParent": "fixture-trace-product-2",
+        "product": {
+          "sku": "GLOBAL-MUG-11OZ",
+          "description": "11oz ceramic mug",
+          "productDimensions": { "width": 3.5, "height": 3.75, "units": "in" },
+          "attributes": { "color": [ "white" ] },
+          "printAreas": [ "default" ],
+          "variants": [
+            {
+              "attributes": { "color": "white" },
+              "shipsFrom": [ "US" ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

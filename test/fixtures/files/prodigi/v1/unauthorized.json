@@ -1,0 +1,5 @@
+{
+  "outcome": "Error",
+  "traceParent": "fixture-trace-unauthorized",
+  "error": { "code": "Unauthorized", "message": "Synthetic unauthorized" }
+}
