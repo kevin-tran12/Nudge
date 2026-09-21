@@ -23,7 +23,7 @@ class Cart::CatalogVariantResolver
 
   Resolution = Data.define(:product_variant, :price, :availability)
 
-  def initialize(product_reader: Catalog::FixtureProductReader.new)
+  def initialize(product_reader: Catalog::ReaderSelection.call)
     @product_reader = product_reader
   end
 

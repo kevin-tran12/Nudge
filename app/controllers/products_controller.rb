@@ -8,10 +8,7 @@ class ProductsController < ApplicationController
   }.freeze
 
   def self.build_product_reader(environment: Rails.env)
-    return Catalog::FixtureProductReader.new if environment.local?
-    return Catalog::DatabaseProductReader.new if environment.staging? || environment.production?
-
-    raise Catalog::ProductReader::Error.new(:source_unavailable, retryable: true), cause: nil
+    Catalog::ReaderSelection.call(environment: environment)
   end
 
   def index

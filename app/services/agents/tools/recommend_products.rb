@@ -18,7 +18,7 @@ module Agents
       MAX_QUERY_BYTES = Search::LexicalRetrieval::MAX_QUERY_BYTES
       VERDICT_ORDER = { "pass" => 0, "unknown" => 1, "fail" => 2 }.freeze
 
-      def initialize(product_reader: Catalog::FixtureProductReader.new, retrieval: Search::LexicalRetrieval.new,
+      def initialize(product_reader: Catalog::ReaderSelection.call, retrieval: Search::LexicalRetrieval.new,
         evaluator: Shopping::EligibilityEvaluator.new)
         @product_reader = product_reader
         @retrieval = retrieval

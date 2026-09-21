@@ -4,10 +4,13 @@ require "test_helper"
 # attacker-influenced supplier URLs. Widening it for a real provider host must
 # not weaken its shape, so this pins both what is allowed and what still is not.
 class CjMediaHostAllowlistTest < ActiveSupport::TestCase
+  # Surveyed across roughly 250 products in five categories on 2026-09-20.
   ALLOWED = %w[
     cf.cjdropshipping.com
     oss-cf.cjdropshipping.com
+    oss.cjdropshipping.com
     cc-west-usa.oss-us-west-1.aliyuncs.com
+    cj-product-center.oss-accelerate.aliyuncs.com
   ].freeze
 
   test "the normalizer and the reader agree on the approved hosts" do
@@ -21,6 +24,16 @@ class CjMediaHostAllowlistTest < ActiveSupport::TestCase
     # Verified against a real CJ product/query response: every image URL it
     # returned was served from this host.
     assert_includes Integrations::Cj::Normalizer::MEDIA_HOSTS, "oss-cf.cjdropshipping.com"
+  end
+
+  test "a wildcard is never used for shared bucket hosting" do
+    # *.aliyuncs.com is shared infrastructure: a wildcard would admit any
+    # Aliyun customer's bucket, so only exact buckets are approved.
+    Integrations::Cj::Normalizer::MEDIA_HOSTS.each do |host|
+      refute_includes host, "*", "#{host} must be an exact host, not a pattern"
+    end
+    refute_includes Integrations::Cj::Normalizer::MEDIA_HOSTS, "oss-accelerate.aliyuncs.com"
+    refute_includes Integrations::Cj::Normalizer::MEDIA_HOSTS, "aliyuncs.com"
   end
 
   test "hosts outside the supplier CDN are still rejected" do

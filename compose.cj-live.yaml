@@ -1,0 +1,6 @@
+# Named explicitly with -f for a deliberate live capture. Never part of an
+# ordinary build, boot, test or CI command.
+services:
+  app:
+    env_file:
+      - .env.providers

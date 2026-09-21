@@ -13,7 +13,9 @@ module Catalog
     APPROVED_MEDIA_HOSTS = %w[
       cf.cjdropshipping.com
       oss-cf.cjdropshipping.com
+      oss.cjdropshipping.com
       cc-west-usa.oss-us-west-1.aliyuncs.com
+      cj-product-center.oss-accelerate.aliyuncs.com
     ].freeze
     ID_PATTERN = /\A[A-Za-z0-9_{}-]+\z/
     CURSOR_PATTERN = /\A(?:0|[1-9]\d{0,5})\z/

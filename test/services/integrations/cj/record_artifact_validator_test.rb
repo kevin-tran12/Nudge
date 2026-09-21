@@ -187,7 +187,10 @@ class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
     captured = result_for(:product).artifact_bytes
     invalid = [ "", "{", captured + "{}", captured.b + "\xFF".b,
       captured.encode(Encoding::UTF_16LE), "[" * 30 + "]" * 30 ]
-    %w[NaN Infinity -Infinity 1e400 -1e400 10000000000 -10000000000 1e-1000000 -1e-1000000].each do |number|
+    # 9007199254740992 is MAX_ABSOLUTE_NUMBER + 1: the first integer past the
+    # bound now that a millisecond epoch createTime has to fit under it.
+    %w[NaN Infinity -Infinity 1e400 -1e400 9007199254740992 -9007199254740992
+      1e-1000000 -1e-1000000].each do |number|
       invalid << captured.sub('"variantWeight":250.5', "\"variantWeight\":#{number}")
       invalid << captured.sub('"code":200', "\"message\":#{number},\"code\":200")
     end
@@ -401,9 +404,19 @@ class CjRecordArtifactValidatorTest < ActiveSupport::TestCase
     active.fetch("data")["description"] = "<p>Safe</p><script>SYNTHETIC-SECRET</script>"
     assert_sanitized_error { validate_product(active) }
 
-    attributed = fixture.fetch("response").deep_dup
-    attributed.fetch("data")["description"] = '<p class="provider-style">Safe</p>'
-    assert_sanitized_error { validate_product(attributed) }
+    benign = fixture.fetch("response").deep_dup
+    benign.fetch("data")["description"] = '<p class="provider-style">Safe</p>'
+    assert_equal :product, validate_product(benign).operation
+
+    %w[onclick srcdoc formaction].each do |attribute|
+      vector = fixture.fetch("response").deep_dup
+      vector.fetch("data")["description"] = %(<p #{attribute}="SYNTHETIC-SECRET">Safe</p>)
+      assert_sanitized_error { validate_product(vector) }
+    end
+
+    scheme = fixture.fetch("response").deep_dup
+    scheme.fetch("data")["description"] = %(<a href="java\tscript:alert(1)">SYNTHETIC-SECRET</a>)
+    assert_sanitized_error { validate_product(scheme) }
   end
 
   test "does not expose artifact bytes through inspect JSON errors or logs" do
