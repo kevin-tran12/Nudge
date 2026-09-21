@@ -1,0 +1,42 @@
+{
+  "fixture_version": 1,
+  "observed_at": "2026-09-20T00:00:00Z",
+  "entries": [
+    {
+      "request": {
+        "merchant_reference": "order-ref-1",
+        "shipping_method": "Standard",
+        "recipient": {
+          "name": "Jane Doe",
+          "address": {
+            "line1": "1 Main St",
+            "postalOrZipCode": "94103",
+            "countryCode": "US",
+            "townOrCity": "San Francisco"
+          }
+        },
+        "items": [
+          {
+            "sku": "GLOBAL-CFPM-16X24",
+            "copies": 1,
+            "assets": [ { "printArea": "default", "url": "https://example.com/art.jpg" } ]
+          }
+        ],
+        "idempotency_key": "idem-key-1",
+        "callback_url": "https://example.com/callbacks/prodigi",
+        "metadata": { "internalOrderId": "abc123" }
+      },
+      "response": {
+        "outcome": "Created",
+        "traceParent": "fixture-trace-order-1",
+        "order": {
+          "id": "ord_fixture_1",
+          "created": "2026-09-20T00:00:00Z",
+          "status": { "stage": "InProgress", "issues": [], "details": {} },
+          "merchantReference": "order-ref-1",
+          "shipments": []
+        }
+      }
+    }
+  ]
+}

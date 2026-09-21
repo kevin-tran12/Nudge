@@ -1,0 +1,5 @@
+{
+  "outcome": "Ok",
+  "traceParent": "fixture-trace-malformed",
+  "product": "invalid payload shape"
+}

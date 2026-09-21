@@ -1,0 +1,23 @@
+{
+  "fixture_version": 1,
+  "observed_at": "2026-09-20T00:00:00Z",
+  "entries": [
+    {
+      "request": { "order_id": "ord_fixture_1" },
+      "response": {
+        "outcome": "Ok",
+        "traceParent": "fixture-trace-order-status-1",
+        "order": {
+          "id": "ord_fixture_1",
+          "status": { "stage": "Complete", "issues": [], "details": {} },
+          "shipments": [
+            {
+              "carrier": { "name": "USPS", "service": "Standard" },
+              "tracking": { "number": "1Z999", "url": "https://example.com/track" }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
