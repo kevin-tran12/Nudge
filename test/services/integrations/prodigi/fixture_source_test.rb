@@ -39,11 +39,16 @@ class ProdigiFixtureSourceTest < ActiveSupport::TestCase
   end
 
   test "non-success scenarios read the scenario-wide file regardless of which entry matched" do
+    # Every scenario file's own product/sku is irrelevant here -- the point is that ANY request
+    # (matched by sku or not) reads the same scenario-wide fixture rather than a per-request one.
+    # throttled/unauthorized carry no "product" key at all; malformed's "product" is a string, not
+    # a Hash -- so this must not assume "product" is present or shaped like a real product body.
     [ :throttled, :unauthorized, :malformed ].each do |scenario|
       source = Integrations::Prodigi::FixtureSource.new(scenario: scenario)
       fixture = source.read(:product, { "sku" => "GLOBAL-CFPM-16X24" })
       body = JSON.parse(fixture.fetch(:body))
-      refute_equal "GLOBAL-CFPM-16X24", body.dig("product", "sku")
+      refute_equal "Ok", body.fetch("outcome") unless scenario == :malformed
+      assert_equal "fixture-trace-#{scenario}", body.fetch("traceParent")
     end
   end
 

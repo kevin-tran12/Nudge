@@ -125,8 +125,13 @@ class ProdigiTransportTest < ActiveSupport::TestCase
     seen_kwargs = nil
     transport = Integrations::Prodigi::Transport.new(http_start: lambda do |host, port, **kwargs, &blk|
       seen_kwargs = kwargs
+      # Build the response before define_singleton_method, not inside it: that block runs with
+      # self rebound to fake_http, so calling the private helper fake_response from inside it
+      # raises NoMethodError -- caught by Transport's broad rescue and silently turned into a
+      # generic :unavailable error, masking the TLS/timeout assertions below entirely.
+      response = fake_response(Net::HTTPOK, "200", body: "{}")
       fake_http = Object.new
-      fake_http.define_singleton_method(:request) { |_request, &block| block.call(fake_response(Net::HTTPOK, "200", body: "{}")) }
+      fake_http.define_singleton_method(:request) { |_request, &block| block.call(response) }
       blk.call(fake_http)
     end)
 

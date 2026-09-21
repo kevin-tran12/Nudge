@@ -91,7 +91,7 @@ class ProdigiAdapterTest < ActiveSupport::TestCase
       raise Integrations::Prodigi::Error.new(:unavailable) if calls == 1
       JSON.generate(success_quote_body)
     end
-    adapter = sandbox_adapter(transport: transport, waiter: ->(_seconds) {})
+    adapter = sandbox_adapter(transport: transport, waiter: ->(_seconds) { })
 
     result = adapter.quote(destination_country: "US", items: [ { sku: "GLOBAL-CFPM-16X24", copies: 1 } ])
 
@@ -106,7 +106,7 @@ class ProdigiAdapterTest < ActiveSupport::TestCase
       raise Integrations::Prodigi::Error.new(:throttled) if calls == 1
       JSON.generate(success_order_status_body)
     end
-    adapter = sandbox_adapter(transport: transport, waiter: ->(_seconds) {})
+    adapter = sandbox_adapter(transport: transport, waiter: ->(_seconds) { })
 
     result = adapter.order_status(order_id: "ord_fixture_1")
 
@@ -117,7 +117,7 @@ class ProdigiAdapterTest < ActiveSupport::TestCase
   test "retries are bounded by MAX_ATTEMPTS and the error surfaces once exhausted" do
     calls = 0
     transport = fake_transport { |**| calls += 1; raise Integrations::Prodigi::Error.new(:unavailable) }
-    adapter = sandbox_adapter(transport: transport, waiter: ->(_seconds) {})
+    adapter = sandbox_adapter(transport: transport, waiter: ->(_seconds) { })
 
     assert_raises(Integrations::Prodigi::Error) { adapter.product(sku: "GLOBAL-CFPM-16X24") }
     assert_equal Integrations::Prodigi::Adapter::MAX_ATTEMPTS, calls
@@ -161,7 +161,7 @@ class ProdigiAdapterTest < ActiveSupport::TestCase
       raise Integrations::Prodigi::Error.new(:throttled) if read_calls == 1
       JSON.generate(success_order_status_body)
     end
-    read_adapter = sandbox_adapter(transport: read_transport, waiter: ->(_seconds) {})
+    read_adapter = sandbox_adapter(transport: read_transport, waiter: ->(_seconds) { })
     read_adapter.order_status(order_id: "ord_fixture_1")
     assert_equal 2, read_calls, "order_status must retry past a single throttled failure"
 
@@ -275,7 +275,7 @@ class ProdigiAdapterTest < ActiveSupport::TestCase
 
   private
 
-  def sandbox_adapter(transport:, pacer: no_op_pacer, waiter: ->(_seconds) {}, raw_sink: Integrations::Prodigi::Adapter::NO_RAW_SINK)
+  def sandbox_adapter(transport:, pacer: no_op_pacer, waiter: ->(_seconds) { }, raw_sink: Integrations::Prodigi::Adapter::NO_RAW_SINK)
     Integrations::Prodigi::Adapter.new(
       mode: :sandbox, deployment: :development,
       capability: Integrations::Prodigi::ModePolicy::SANDBOX_CAPABILITY,
