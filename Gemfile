@@ -62,5 +62,5 @@ group :test do
   gem "capybara"
   gem "selenium-webdriver"
   # Enforce the repository's line and branch coverage baseline in the full test lane.
-  gem "simplecov", "~> 0.22", require: false
+  gem "simplecov", "~> 1.3", require: false
 end
